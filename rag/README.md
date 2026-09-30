@@ -62,7 +62,7 @@ evidence = rag_search(
 | `download_docs.py` | 공식 출처에서 PDF 받기 |
 | `parse_pdfs.py` | 쪽 단위 추출 → 머리말 · 줄번호 · 합자 정제 → 청크(기본 1000자, 문자 기준) |
 | `build_index.py` | 임베딩 → FAISS 저장 (`data/index/`) |
-| `retriever.py` | `get_retriever(doc_type, mode)` — bm25 · dense · ensemble |
+| `retriever.py` | `get_retriever(doc_type, mode)` — bm25 · faiss · ensemble |
 | `rag_search.py` | 에이전트용 Agentic RAG (`rag_search`, `make_rag_tool`) |
 | `eval_retriever.py` | Hit Rate@K · MRR (`data/eval/questions.jsonl`) |
 | `prepare.py` | 받기 → 파싱 → 인덱스 한 번에 |

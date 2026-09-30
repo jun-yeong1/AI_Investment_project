@@ -21,8 +21,7 @@ RAG 문서에는 특정 기업 이야기가 없고 기준 · 제도 · 통계가
 환경변수 (.env)
     OPENAI_API_KEY   필수 — 질문 생성 · 관련성 채점
     TAVILY_API_KEY   선택 — 웹 보강 (없으면 웹 단계를 건너뛴다)
-    RAG_LLM_MODEL    기본 gpt-4o-mini
-    RAG_SEARCH_MODE  기본 ensemble (임베딩 인덱스가 없으면 bm25)
+    청킹 · 임베딩 · 검색 방식 · LLM 모델은 rag/settings.py (실험으로 고른 값, 환경변수로 덮어쓰기 가능)
 """
 import os
 from functools import lru_cache
@@ -34,13 +33,12 @@ from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
-from rag.retriever import get_retriever
+from rag import settings
+from rag.retriever import search
 from rag.sources import DOC_TYPES
 from tools.evidence import Evidence, make_evidence
 
 load_dotenv()
-LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gpt-4o-mini")
-SEARCH_MODE = os.getenv("RAG_SEARCH_MODE", "ensemble")
 TOOL_NAMES = {"규제": "regulation", "기술": "technology", "시장·사업성": "market"}
 
 
@@ -69,7 +67,7 @@ class RagState(TypedDict, total=False):
 
 @lru_cache
 def _llm():
-    return init_chat_model(LLM_MODEL, temperature=0)
+    return init_chat_model(settings.LLM_MODEL, temperature=0)
 
 
 def _pipeline_text(pipeline: list[dict]) -> str:
@@ -93,16 +91,7 @@ def make_queries(s: RagState) -> RagState:
 
 
 def retrieve(s: RagState) -> RagState:
-    k = s.get("k", 3)
-    retriever = get_retriever(s["doc_type"], k=k, mode=SEARCH_MODE)
-    results = [retriever.invoke(q)[:k] for q in s["queries"]]
-    merged, seen = [], set()
-    for rank in range(k):                       # 한국어 · 영어 결과를 번갈아 합친다
-        for docs in results:
-            if rank < len(docs) and docs[rank].metadata["id"] not in seen:
-                seen.add(docs[rank].metadata["id"])
-                merged.append(docs[rank])
-    return {"docs": merged}
+    return {"docs": search(s["doc_type"], s["queries"], k=s.get("k", 3))}
 
 
 def grade(s: RagState) -> RagState:

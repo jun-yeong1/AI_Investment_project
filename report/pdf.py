@@ -18,11 +18,18 @@ INK = (0.12, 0.19, 0.28)
 MUTED = (0.38, 0.44, 0.50)
 ACCENT = (0.13, 0.37, 0.56)
 LIGHT = (0.94, 0.97, 0.99)
-FONT_NAME = "korea"  # PyMuPDF에 내장된 한국어 폰트; 운영체제 폰트 설치가 필요 없다.
+FONT_PATH = next((path for path in (
+    Path("/System/Library/Fonts/Supplemental/AppleGothic.ttf"),
+    Path("/Library/Fonts/AppleGothic.ttf"),
+) if path.is_file()), None)
+FONT_NAME = "report_korean" if FONT_PATH else "korea"
+FONT = pymupdf.Font(fontfile=str(FONT_PATH)) if FONT_PATH else None
 
 
 def _text_width(value: str, size: float) -> float:
-    # Font.text_length는 내장 CJK 폰트의 실제 insert_text 폭보다 작게 계산된다.
+    if FONT is not None:
+        return FONT.text_length(value, fontsize=size)
+    # 내장 CJK 폰트는 Font.text_length가 실제 insert_text 폭보다 작게 계산된다.
     return pymupdf.get_text_length(value, fontname=FONT_NAME, fontsize=size)
 
 
@@ -55,6 +62,8 @@ def _wrap(text: str, width: float, size: float) -> list[str]:
 class _Page:
     def __init__(self, doc: pymupdf.Document, title: str, page_number: int, section: str):
         self.page = doc.new_page(width=PAGE_W, height=PAGE_H)
+        if FONT_PATH:
+            self.page.insert_font(fontname=FONT_NAME, fontfile=str(FONT_PATH))
         self.y = 47.0
         self.page.draw_rect(pymupdf.Rect(0, 0, PAGE_W, 9), color=ACCENT, fill=ACCENT)
         self.text(title, size=14, color=INK, gap=9)

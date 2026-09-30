@@ -9,7 +9,7 @@ python -m rag.prepare          # 문서 받기 → 파싱 → bge-m3 인덱스 (
 ```
 
 준비(`rag.prepare`)는 API 키 없이 돈다. 검색(`rag_search`)의 질문 생성 · 관련성 채점에는 `.env`의 `OPENAI_API_KEY`가 필요하다.
-생명공학연구원 이슈페이퍼는 BioIN 로그인이 필요해 저장소에 없다 — 받으면 `data/raw/tech_KRIBB_AI_drug_issue_paper_2025.pdf`로 넣고 다시 준비한다.
+원본 PDF 6종은 모두 `data/raw/`에 들어 있다.
 
 ## 2. 에이전트에서 쓰기 (계약: `rag/types.py`)
 

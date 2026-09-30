@@ -218,27 +218,36 @@ AI_Investment_project-develop/
 │   ├── rubric.py              # 12개 위험요인 평가 기준
 │   ├── schema.py              # LLM 구조화 출력 스키마
 │   └── scorer.py              # 점수·판정·민감도 계산
-├── prompts/
-│   └── judge.md               # 투자 판단 프롬프트
+├── prompts/                   # 프롬프트
+│   ├── judge.md
+│   └── research/
+│       ├── company.md
+│       ├── market.md
+│       ├── regulation.md
+│       └── tech.md
 ├── rag/
-│   ├── build_index.py         # 임베딩 및 FAISS 인덱스 생성
-│   ├── eval_retriever.py      # Hit Rate@K·MRR 평가
-│   ├── experiment.py          # 청킹·임베딩·검색 방식 비교
-│   ├── parse_pdfs.py          # PDF 파싱 및 청킹
-│   ├── prepare.py             # RAG 준비 과정 통합 실행
-│   ├── rag_search.py          # Agentic RAG 검색 그래프
-│   ├── retriever.py           # BM25·FAISS·앙상블 검색기
-│   ├── settings.py            # 최적 검색 설정
-│   ├── sources.py             # 문서 출처와 doc_type
-│   └── vision.py              # 표·그래프·이미지 전사
-├── report/                    # 보고서 생성 모듈(통합 예정)
-├── tests/                     # Graph·RAG·Judge 테스트
+│   ├── settings.py
+│   ├── sources.py              # 문서 출처 정의
+│   ├── types.py
+│   ├── download_docs.py        # 문서 다운로드
+│   ├── parse_pdfs.py           # PDF 파싱
+│   ├── vision.py               # 비전 기반 파싱
+│   ├── prepare.py              # 청킹/전처리
+│   ├── build_index.py          # FAISS 인덱스 생성
+│   ├── retriever.py            # 검색기
+│   ├── rag_search.py           # 검색 실행
+│   ├── eval_retriever.py       # 검색기 평가
+│   └── experiment.py           # 실험 스크립트
+├── outputs/                    # 생성된 리포트 저장
+├── tests/                      # Graph·RAG·Judge 테스트
 ├── tools/
-│   └── evidence.py            # Evidence·Pipeline 공통 타입
-├── config.py                  # 후보·평가 항목·판정 기준 설정
-├── graph.py                   # 전체 LangGraph 조립
-├── state.py                   # LangGraph 공유 State
-├── requirements.txt           # Python 의존성
+│   ├── evidence.py             # 근거 수집
+│   └── web.py                  # 웹 검색
+├── config.py                   # 후보·평가 항목·판정 기준 설정
+├── graph.py                    # 전체 LangGraph 조립
+├── state.py                    # LangGraph 공유 State
+├── app.py                      # 전체 파이프라인 시작 파일
+├── requirements.txt            # Python 의존성
 └── README.md
 ```
 
@@ -296,7 +305,11 @@ python -m rag.experiment
 pytest
 ```
 
-전체 에이전트 실행 명령은 조사·보고서 모듈 통합 후 추가할 예정입니다.
+### 6. 전체 에이전트 실행
+
+```bash
+python app.py
+```
 
 ## Retrieval Evaluation
 

@@ -50,10 +50,10 @@
 
 - **Language**: Python
 - **Framework**: LangGraph, LangChain
-- **LLM / Generator**: Gpt4o-mini
+- **LLM / Generator**: Gpt4.1-mini
 - **LLM / Relevance Grader**: Gpt4o-mini
-- **LLM / Vision Parser**: Gpt4o-mini
-- **LLM / Judge**: Gpt4o-mini
+- **LLM / Vision Parser**: Gpt4.1-mini
+- **LLM / Judge**: Gpt4.1-mini
 - **PDF Parsing**: PyMuPDF
 - **Retrieval**: FAISS — Hit Rate@3 **0.824**, MRR **0.703**
 - **Embedding**: `BAAI/bge-m3`

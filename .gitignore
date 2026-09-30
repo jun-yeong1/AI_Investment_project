@@ -23,3 +23,5 @@ data/processed/*
 !data/processed/vision/
 data/index/*
 !data/index/.gitkeep
+# 로그인해야 받는 문서(생명공학연구원)의 전사본은 올리지 않는다
+data/processed/vision/tech_KRIBB_*

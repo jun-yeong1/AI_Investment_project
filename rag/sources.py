@@ -1,6 +1,6 @@
 """RAG 문서 목록. 파일 이름 · doc_type · 출처 정보를 한곳에서 관리한다.
 
-- committed=True : 저장소에 PDF를 포함한다 (FDA = 미국 정부 문서, Jayatunga = CC BY-NC-ND)
+- committed=True : 저장소에 PDF를 포함한다 (FDA = 미국 정부 문서, Jayatunga = CC BY-NC-ND, BIO = 공식 주소 404 대비)
 - url 이 있는 문서 : rag/download_docs.py 가 공식 출처에서 받는다
 - optional=True  : 없어도 파이프라인이 돈다 (로그인이 필요해 자동으로 받을 수 없는 문서)
 """
@@ -34,7 +34,7 @@ DOCS = {
         "source_url": "https://www.bioin.or.kr/board.do?num=330782&cmd=view&bid=report",
     },
     "market_BIO_clinical_success_rates_2021.pdf": {
-        "doc_type": "market", "lang": "en", "year": 2021,
+        "doc_type": "market", "lang": "en", "year": 2021, "committed": True,   # 공식 주소가 막힐 때가 있어 저장소에 포함
         "publisher": "BIO, Informa Pharma Intelligence, QLS Advisors",
         "title": "Clinical Development Success Rates and Contributing Factors 2011–2020",
         "source_url": "https://go.bio.org/rs/490-EHZ-999/images/ClinicalDevelopmentSuccessRates2011_2020.pdf",

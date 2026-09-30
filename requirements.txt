@@ -1,0 +1,21 @@
+# LangGraph · LLM
+langgraph
+langchain
+langchain-core
+langchain-openai
+langchain-tavily
+python-dotenv
+pydantic
+
+# RAG
+langchain-community
+langchain-classic
+langchain-text-splitters
+pymupdf
+sentence-transformers
+faiss-cpu
+kiwipiepy
+rank-bm25
+
+# 테스트
+pytest

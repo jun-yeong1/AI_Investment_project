@@ -12,10 +12,14 @@
      - 그대로 둠: 표 · 그래프에서 나온 숫자, 목차, 참고문헌
      - 문장 중간에서 끊긴 줄은 이어 붙이고, 글머리(□ ❍ ㅇ * -)는 새 줄로 유지, 합자(ﬁ → fi) 풀기
   3. 표 · 그래프 · 그림 전사 (rag/vision.py) — 쪽을 이미지로 바꿔 비전 LLM이 표는 마크다운 표로,
-     그래프는 "라벨: 값"으로 옮긴다. 글자가 이미지로만 된 쪽(표지 등)은 쪽 전체를 옮긴다. 결과는 캐시
+     그래프는 "라벨: 값"으로 옮긴다. 그 쪽의 글자 층을 참고로 함께 주되 이미지에서 보이는 값을 우선한다
+     (글자 층도 겹친 도형 때문에 숫자가 깨질 수 있다 — 기술특례상장 4쪽 "1개"가 "111개"로 추출됨). 글자가 이미지로만 된 쪽(표지 등)은 쪽 전체를 옮긴다. 결과는 캐시
   4. 청크 분할 — CHUNKINGS 중 하나
        r500 / r1000 / r1500 : 문자 기준 재귀 분할(겹침 10%)
        page                 : 한 쪽 = 한 청크 (문단 · 표가 쪽 안에서 끊기지 않음)
+       struct               : 문서 구조 기반 — 쪽 안에서 상위 제목 · 글머리(A. 1. □ ❍ ○ ▶ #)를 경계로 자르고,
+                              하위 글머리(- * ※ •)는 위 덩어리에 붙인다. 표 · 그림 전사본은 따로 한 덩어리.
+                              300자 미만은 이웃과 합치고, 1,200자 초과는 다시 나눈다
   5. data/processed/chunks_{방식}.jsonl 저장 — 사람이 열어 보고 청크 품질을 확인할 수 있게
 """
 import argparse
@@ -34,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "data" / "processed"
 
+MAX_PAGE_CHARS = 20000                       # 한 쪽이 이보다 길면 불량(비전 폭주 등)으로 보고 멈춘다
 MIN_PAGE_CHARS = 50                          # 글자 추출이 이보다 적으면 이미지로 된 쪽 → 쪽 전체를 비전으로 전사
 EDGE_LINES = 3                               # 쪽 위 · 아래 몇 줄을 머리말 · 꼬리말 후보로 볼지
 REPEAT_RATIO = 0.3                           # 전체 쪽의 30% 이상에서 위 · 아래에 반복되면 머리말 · 꼬리말
@@ -105,7 +110,8 @@ def load_pdf(path: Path, vision: bool = True) -> list[Document]:
     if vision:
         from rag.vision import describe_page
         with ThreadPoolExecutor(max_workers=6) as pool:
-            extras = list(pool.map(lambda i: describe_page(path, i + 1, full=image_only[i]), range(len(pages))))
+            extras = list(pool.map(lambda i: describe_page(path, i + 1, full=image_only[i], ref_text=texts[i]),
+                                    range(len(pages))))
     else:
         extras = [""] * len(pages)
 
@@ -127,7 +133,36 @@ def load_pdf(path: Path, vision: bool = True) -> list[Document]:
 
 # 청킹 방식 이름 → (방법, 크기). 실험에서 이 이름으로 비교한다
 CHUNKINGS = {"r500": ("recursive", 500), "r1000": ("recursive", 1000),
-             "r1500": ("recursive", 1500), "page": ("page", None)}
+             "r1500": ("recursive", 1500), "page": ("page", None), "struct": ("struct", 1200)}
+
+# 구조 경계: 번호 제목(I. A. 1. 가.), 한국 공문서 상위 글머리, 마크다운 제목
+SECTION_START = re.compile(r"^([IVXⅠ-Ⅹ]+\.\s|[A-Z]\.\s|\d{1,2}\.\s|[가-하]\.\s|[□❍○ㅇ◈▶◾◼➲◇■◆]|#{1,3}\s)")
+STRUCT_MIN = 300
+
+
+def struct_split(page: Document, max_size: int = 1200) -> list[Document]:
+    """쪽 하나를 구조 경계에서 나눈다. 표 · 그림 전사본은 따로 둔다."""
+    body, _, figure = page.page_content.partition("\n\n[표·그림]\n")
+    blocks: list[str] = []
+    for line in body.splitlines():
+        if not blocks or SECTION_START.match(line):
+            blocks.append(line)
+        else:
+            blocks[-1] += "\n" + line                     # 하위 글머리 · 이어지는 문장은 위 덩어리에
+    merged: list[str] = []
+    for block in blocks:                                   # 너무 작은 덩어리는 이웃과 합친다
+        if merged and (len(merged[-1]) < STRUCT_MIN or len(block) < STRUCT_MIN // 3):
+            merged[-1] += "\n" + block
+        else:
+            merged.append(block)
+    if figure:
+        merged.append("[표·그림]\n" + figure)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=max_size, chunk_overlap=max_size // 10)
+    out = []
+    for text in merged:                                    # 너무 큰 덩어리는 다시 나눈다
+        for piece in (splitter.split_text(text) if len(text) > max_size else [text]):
+            out.append(Document(page_content=piece, metadata=dict(page.metadata)))
+    return out
 
 
 def run(chunk: str = "r1000", vision: bool = True) -> Path:
@@ -138,8 +173,14 @@ def run(chunk: str = "r1000", vision: bool = True) -> Path:
     all_chunks = []
     for path in pdfs:
         pages = load_pdf(path, vision=vision)
+        too_long = [p.metadata["page"] for p in pages if len(p.page_content) > MAX_PAGE_CHARS]
+        if too_long:   # 비전 폭주 출력 등 불량 데이터로 인덱스를 만들지 않게 여기서 멈춘다
+            raise ValueError(f"{path.name} p.{too_long}: 한 쪽 텍스트가 {MAX_PAGE_CHARS:,}자를 넘음 — "
+                             "data/processed/vision/ 의 해당 쪽 캐시를 확인하세요")
         if method == "page":
             chunks = pages
+        elif method == "struct":
+            chunks = [c for p in pages for c in struct_split(p, size)]
         else:
             splitter = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=size // 10)  # 문자 기준
             chunks = splitter.split_documents(pages)

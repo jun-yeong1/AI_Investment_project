@@ -9,6 +9,7 @@
 에이전트는 보통 rag.rag_search.rag_search() 를 쓴다 (질문 재작성 · 관련성 채점 · 웹 보강 포함).
 """
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -55,11 +56,21 @@ class STEmbeddings(Embeddings):
 _kiwi = Kiwi()
 
 
+_SYMBOL_RUN = re.compile(r"[|\-=_:·.~*#]{2,}")   # 표 구분선 등 기호 반복 — Kiwi가 긴 기호열에서 멈추는 문제 방지
+
+
 def kiwi_tokenize(text: str) -> list[str]:
-    """명사 · 동사 · 형용사 · 숫자 · 외국어(영문)만 남긴다. 영문은 소문자로 맞춘다."""
-    return [t.form.lower() if t.tag == "SL" else t.form
-            for t in _kiwi.tokenize(text)
-            if t.tag in ("NNG", "NNP", "NNB", "VV", "VA", "SL", "SN")]
+    """명사 · 동사 · 형용사 · 숫자 · 외국어(영문)만 남긴다. 영문은 소문자로 맞춘다.
+    기호 반복을 공백으로 바꾸고, 줄 단위(최대 400자)로 나눠 분석한다."""
+    tokens = []
+    for line in _SYMBOL_RUN.sub(" ", text).splitlines():
+        for i in range(0, len(line), 400):
+            piece = line[i:i + 400].strip()
+            if piece:
+                tokens += [t.form.lower() if t.tag == "SL" else t.form
+                           for t in _kiwi.tokenize(piece)
+                           if t.tag in ("NNG", "NNP", "NNB", "VV", "VA", "SL", "SN")]
+    return tokens
 
 
 @lru_cache

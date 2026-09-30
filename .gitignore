@@ -1,0 +1,11 @@
+# 비밀 키 — 절대 커밋 금지
+.env
+
+# 파이썬 · 환경
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store

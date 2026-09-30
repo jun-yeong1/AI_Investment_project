@@ -202,6 +202,13 @@ flowchart TD
 ```
 AI_Investment_project-develop/
 ├── agents/                    # 조사 에이전트 모듈(통합 예정)
+│   ├── __init__.py            # 패키지 설명 (기업별 조사 노드)
+│   ├── common.py              # 공통 조사 로직 (검색 · 원문 검증 · 근거 변환)
+│   ├── select_candidate.py    # 평가 순서대로 다음 기업 선택
+│   ├── company.py             # 경영진 · 자금 조달 · 평판 조사
+│   ├── tech_pipeline.py       # 기술 검증 · 사업 단계 · 제조 · 물질별 파이프라인 조사
+│   ├── regulation.py          # 물질·적응증 단위 규제 · 소송 · 해외 진행 조사
+│   └── market.py              # 물질·적응증 단위 시장 · 경쟁 · 사업화 · 투자금 회수 조사
 ├── data/
 │   ├── raw/                   # 원본 PDF 6종
 │   ├── processed/             # 파싱·청킹·비전 전사 결과

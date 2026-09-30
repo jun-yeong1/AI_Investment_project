@@ -1,0 +1,6 @@
+{"question": "Fast Track 지정을 받으려면 어떤 조건을 충족해야 하나?", "doc_type": "규제", "gold_source": "regulation_FDA_expedited_programs_2014.pdf", "gold_pages": [13]}
+{"question": "What are the qualifying criteria for breakthrough therapy designation?", "doc_type": "규제", "gold_source": "regulation_FDA_expedited_programs_2014.pdf", "gold_pages": [14]}
+{"question": "임상 1상에 들어간 후보물질이 FDA 승인까지 갈 확률은?", "doc_type": "시장·사업성", "gold_source": "market_BIO_clinical_success_rates_2021.pdf", "gold_pages": [10]}
+{"question": "딥테크 기업의 기술특례상장 단수평가 허용 내용은?", "doc_type": "시장·사업성", "gold_source": "market_FSC_tech_listing_reform_2023.pdf", "gold_pages": [6]}
+{"question": "AI로 발굴한 신약 후보물질의 임상 1상 성공률은?", "doc_type": "기술", "gold_source": "tech_Jayatunga_AI_drugs_clinical_2024.pdf", "gold_pages": [1, 2]}
+{"question": "카카오브레인과 갤럭스는 어떤 AI 신약 연구를 함께 했나?", "doc_type": "기술", "gold_source": "tech_KISTEP_AI_drug_brief_2025.pdf", "gold_pages": [5]}

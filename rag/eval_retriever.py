@@ -1,7 +1,7 @@
 """검색 성능 평가: Hit Rate@K, MRR
 
 평가셋: data/eval/questions.jsonl — 한 줄에 질문 하나
-  {"question": "한국어 질문", "question_en": "English query", "doc_type": "규제",
+  {"question": "한국어 질문", "question_en": "English query", "doc_type": "regulation",
    "gold_source": "regulation_FDA_expedited_programs_2014.pdf", "gold_pages": [13]}
 
 - 정답은 청크 번호가 아니라 문서 · 쪽이다. 청킹 방식이 달라도 같은 기준으로 비교할 수 있다.

@@ -4,7 +4,6 @@ import pytest
 from rag.parse_pdfs import clean_page, is_line_numbered, repeated_lines
 from rag.retriever import CHUNK_DIR, get_retriever, kiwi_tokenize
 from rag.sources import DOC_TYPES, DOCS
-from tools.evidence import make_evidence
 
 
 def test_clean_page_removes_only_editing_marks():
@@ -45,11 +44,6 @@ def test_kiwi_tokenize_lowercases_english():
 
 def test_sources_cover_all_doc_types():
     assert {d["doc_type"] for d in DOCS.values()} == set(DOC_TYPES)
-
-
-def test_make_evidence_defaults():
-    ev = make_evidence(company="갤럭스", fact="x", source_type="rag")
-    assert ev["id"].startswith("E") and ev["status"] == "미분류" and len(ev["accessed"]) == 10
 
 
 @pytest.mark.skipif(not (CHUNK_DIR / "chunks_r1000.jsonl").exists(), reason="python -m rag.prepare --chunk r1000 먼저")

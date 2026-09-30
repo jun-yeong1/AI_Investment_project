@@ -92,7 +92,7 @@ def load_faiss(model: str = settings.MODEL, chunk: str = settings.CHUNK) -> FAIS
 @lru_cache
 def get_retriever(doc_type: str, k: int = 3, mode: str = settings.SEARCH_MODE,
                   model: str = settings.MODEL, chunk: str = settings.CHUNK):
-    """doc_type: "규제" | "기술" | "시장·사업성",  mode: "ensemble" | "bm25" | "faiss" """
+    """doc_type: "regulation" | "tech" | "market",  mode: "ensemble" | "bm25" | "faiss" """
     if doc_type not in DOC_TYPES:
         raise ValueError(f"doc_type은 {DOC_TYPES} 중 하나")
 
@@ -110,11 +110,23 @@ def get_retriever(doc_type: str, k: int = 3, mode: str = settings.SEARCH_MODE,
     return EnsembleRetriever(retrievers=[bm25, faiss], weights=[0.5, 0.5])
 
 
+def _hits(doc_type: str, query: str, k: int, mode: str, model: str, chunk: str) -> list[Document]:
+    """한 질문의 검색 결과. metadata["score"]에 점수를 붙인 복사본을 돌려준다(캐시된 원본은 건드리지 않음).
+    faiss: 코사인 유사도(0~1) / bm25 · ensemble: 순위 점수 1/순위"""
+    if mode == "faiss":
+        pairs = load_faiss(model, chunk).similarity_search_with_relevance_scores(
+            query, k=k, filter={"doc_type": doc_type}, fetch_k=len(load_chunks(chunk)))
+    else:
+        docs = get_retriever(doc_type, k=k, mode=mode, model=model, chunk=chunk).invoke(query)[:k]
+        pairs = [(d, 1 / (i + 1)) for i, d in enumerate(docs)]
+    return [Document(page_content=d.page_content, metadata={**d.metadata, "score": round(float(sc), 4)})
+            for d, sc in pairs]
+
+
 def search(doc_type: str, queries: list[str], k: int = 3, mode: str = settings.SEARCH_MODE,
            model: str = settings.MODEL, chunk: str = settings.CHUNK) -> list[Document]:
     """여러 질문(한국어 · 영어)으로 검색해 결과를 번갈아 합친다. rag_search와 평가가 같은 방식을 쓴다."""
-    retriever = get_retriever(doc_type, k=k, mode=mode, model=model, chunk=chunk)
-    results = [retriever.invoke(q)[:k] for q in queries if q]
+    results = [_hits(doc_type, q, k, mode, model, chunk) for q in queries if q]
     merged, seen = [], set()
     for rank in range(k):
         for docs in results:

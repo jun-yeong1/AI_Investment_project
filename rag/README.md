@@ -5,9 +5,11 @@
 ```bash
 pip install -r requirements.txt
 python -m rag.prepare          # 문서 받기 → 파싱 → bge-m3 인덱스 (첫 실행 때 모델 약 2.3GB 다운로드)
+# 표 · 그림 비전 전사는 저장소의 캐시(data/processed/vision/)를 쓰므로 API를 다시 부르지 않는다
 ```
 
-`.env`에 `OPENAI_API_KEY`가 필요하다. `TAVILY_API_KEY`가 있으면 문서에 답이 없을 때 웹 검색으로 보강한다.
+준비(`rag.prepare`)는 API 키 없이 돈다. 검색(`rag_search`)의 질문 생성 · 관련성 채점에는 `.env`의 `OPENAI_API_KEY`가 필요하다.
+생명공학연구원 이슈페이퍼는 BioIN 로그인이 필요해 저장소에 없다 — 받으면 `data/raw/tech_KRIBB_AI_drug_issue_paper_2025.pdf`로 넣고 다시 준비한다.
 
 ## 2. 에이전트에서 쓰기 (계약: `rag/types.py`)
 
@@ -49,7 +51,7 @@ hits = rag_search("희귀의약품 지정이 신약 개발 위험에서 어떤 �
 ```
 
 청킹 · 임베딩 · 검색 방식은 실험으로 정한다: `python -m rag.experiment` → `data/eval/best_config.json` → 자동 적용.
-현재: **청킹 r500 · bge-m3 · FAISS** (문서 6종 · 평가 34문항, MRR 0.73, Hit@3 0.82). 전체 표는 `data/eval/results.md`.
+현재: **청킹 r500 · bge-m3 · FAISS** (문서 6종 · 평가 34문항 · 청킹 5 × 임베딩 3 × 검색 3 비교, MRR 0.703, Hit@3 0.824). 전체 표는 `data/eval/results.md`.
 
 ## 5. 파일
 
@@ -57,12 +59,21 @@ hits = rag_search("희귀의약품 지정이 신약 개발 위험에서 어떤 �
 |---|---|
 | `sources.py` | 문서 목록 · 출처 · doc_type |
 | `download_docs.py` | 공식 출처에서 PDF 받기 |
-| `parse_pdfs.py` | 쪽 단위 추출 → 편집 흔적만 정제(정보는 버리지 않음) → 청크 (r500 · r1000 · r1500 · page) |
-| `vision.py` | 표 · 그래프 · 이미지 쪽을 비전 LLM으로 전사 (캐시) |
+| `parse_pdfs.py` | 쪽 단위 추출 → 편집 흔적만 정제(정보는 버리지 않음) → 청크 (r500 · r1000 · r1500 · page · struct) |
+| `vision.py` | 표 · 그래프 · 이미지 쪽을 비전 LLM(gpt-4.1-mini)으로 전사. 글자 층을 참고로 주되 이미지 값 우선. 캐시 `data/processed/vision/` |
 | `settings.py` | 청킹 · 임베딩 · 검색 방식 기본값 (실험 결과) |
-| `experiment.py` | 청킹 × 임베딩 × 검색 비교 → 최적 설정 저장 |
+| `experiment.py` | 청킹 5종 × 임베딩 3종 × 검색 3종 비교 → 최적 설정 저장 (`results.md`, `best_config.json`) |
 | `build_index.py` | 임베딩 → FAISS 저장 (`data/index/`) |
 | `retriever.py` | `get_retriever(doc_type, mode)` — bm25 · faiss · ensemble |
 | `rag_search.py` | 에이전트용 Agentic RAG (`rag_search` → `list[RagHit]`, `make_rag_tool`) |
 | `eval_retriever.py` | Hit Rate@K · MRR (`data/eval/questions.jsonl`) |
 | `prepare.py` | 받기 → 파싱 → 인덱스 한 번에 |
+
+## 6. 텍스트화에서 알게 된 것
+
+- **정보는 버리지 않는다.** 지우는 것은 줄번호 · 쪽번호 · 반복 머리말의 중복뿐. 표 숫자 · 목차 · 참고문헌은 남긴다.
+- **표 · 그림은 비전 LLM으로 전사한다.** 글자 추출만으로는 차트 값과 표의 행 · 열 관계가 흩어진다 (BIO 보고서 글자 +30%).
+- **이미지로만 된 PDF**(생명공학연구원 이슈페이퍼, BioIN 뷰어 인쇄본 29쪽)는 쪽 전체를 비전으로 옮긴다. gpt-4o-mini는 수치 · 제목을 잘못 읽어 gpt-4.1-mini + 300dpi로 바꿨다.
+- **글자 층도 틀릴 수 있다.** 기술특례상장 4쪽 표의 "1개 / 0.7%"가 강조 테두리와 겹쳐 글자 층에서는 "111개 / 10.7%"로 추출됐다. 그래서 비전에게 글자 층을 참고로 주되 이미지에서 보이는 값을 우선하게 했다.
+- **비전 폭주 출력**: 기술특례상장 14쪽에서 모델이 표 구분선을 210만 자 이어 썼다 → `max_tokens` 제한, 기호 반복 정리, 12,000자 초과 자르기, 파싱 단계에서 한 쪽 2만 자 초과 시 중단. Kiwi 토큰화 전에도 기호열을 지운다.
+- 보고서에 인용하는 표 수치는 원문 PDF와 대조한다.

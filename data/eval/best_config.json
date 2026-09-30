@@ -1,0 +1,13 @@
+{
+  "chunk": "r500",
+  "model": "bge-m3",
+  "mode": "faiss",
+  "MRR": 0.78,
+  "Hit@3": 0.833,
+  "questions": 30,
+  "langs": [
+    "ko",
+    "en"
+  ],
+  "rule": "MRR 최고 조합. 단 MRR 차이 2/30 이내이면서 20% 이상 빠른 조합이 있으면 그것 (최고 MRR 0.78)"
+}

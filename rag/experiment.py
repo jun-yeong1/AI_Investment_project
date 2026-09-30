@@ -20,6 +20,10 @@ import argparse
 import csv
 import gc
 import json
+import os
+
+# 실험은 검색을 수천 번 부른다 — LangSmith 추적을 끄지 않으면 호출마다 기록을 보내 느려지고 한도를 넘는다
+os.environ["LANGSMITH_TRACING"] = os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 from rag import build_index, parse_pdfs
 from rag.eval_retriever import EVAL_PATH, evaluate, load_questions

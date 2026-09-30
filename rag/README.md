@@ -21,7 +21,7 @@ hits = rag_search("희귀의약품 지정이 신약 개발 위험에서 어떤 �
 | 에이전트 | doc_type | 들어 있는 문서 |
 |---|---|---|
 | 규제 | `"regulation"` | FDA Expedited Programs (신속심사 지정 요건) |
-| 기술·파이프라인 | `"tech"` | KISTEP AI 신약 브리프, Jayatunga(2024) AI 발굴 물질 임상 성과 (생명공학연구원 이슈페이퍼는 BioIN 로그인 필요, 받으면 자동 포함) |
+| 기술·파이프라인 | `"tech"` | KISTEP AI 신약 브리프, Jayatunga(2024) AI 발굴 물질 임상 성과, 생명공학연구원 이슈페이퍼(이미지 PDF → 비전 OCR) |
 | 시장·사업화 | `"market"` | BIO 임상 단계별 성공률, 기술특례상장 제도 개선 방안 |
 
 ## 3. 돌려받는 값: `list[RagHit]`
@@ -49,7 +49,7 @@ hits = rag_search("희귀의약품 지정이 신약 개발 위험에서 어떤 �
 ```
 
 청킹 · 임베딩 · 검색 방식은 실험으로 정한다: `python -m rag.experiment` → `data/eval/best_config.json` → 자동 적용.
-현재: **청킹 r500 · bge-m3 · FAISS** (30문항 MRR 0.78, Hit@3 0.83). 전체 표는 `data/eval/results.md`.
+현재: **청킹 r500 · bge-m3 · FAISS** (문서 6종 · 평가 34문항, MRR 0.73, Hit@3 0.82). 전체 표는 `data/eval/results.md`.
 
 ## 5. 파일
 

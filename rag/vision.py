@@ -49,11 +49,12 @@ def describe_page(pdf_path: Path, page_no: int, full: bool = False) -> str:
         llm = init_chat_model(settings.VISION_MODEL, temperature=0)
         msg = HumanMessage(content=[
             {"type": "text", "text": FULL_PROMPT if full else PROMPT},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_render(pdf_path, page_no)}",
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_render(pdf_path, page_no, 300 if full else 150)}",
                                                 "detail": "high"}},
         ])
         text = llm.invoke([msg]).content.strip()
         text = re.sub(r"^```[a-z]*\n?|\n?```$", "", text).strip()   # 코드 블록 표시 제거
+        text = re.sub(r"(^.*\[판독 불가\].*$\n?){2,}", "[판독 불가 — 그림 속 작은 글자]\n", text, flags=re.M)  # 반복 줄 하나로
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache.write_text(text, encoding="utf-8")
     return "" if text.strip() == NONE else text

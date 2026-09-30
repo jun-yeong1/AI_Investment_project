@@ -6,7 +6,7 @@ from langchain.chat_models import init_chat_model
 from config import JUDGE_MODEL, JUDGE_PROVIDER
 from judge.rubric import RUBRIC
 from judge.schema import JudgeOutput
-from judge.scorer import decide, score_item, sensitivity, total_score
+from judge.scorer import decide, report_facts, score_item, sensitivity, total_score
 
 PROMPT = (Path(__file__).parent.parent / "prompts" / "judge.md").read_text(encoding="utf-8")
 
@@ -50,6 +50,7 @@ def summarize(company: dict, answers: list[dict], evidence: list[dict]) -> dict:
             "total": result["total"], "score100": result["score100"],
             "verdict": result["verdict"], "reasons": result["reasons"],
             "reconsider": result["reconsider"], "sensitivity": sensitivity(scores),
+            **report_facts(scores),   # gates, areas, limits -> 보고서 4장 · 5장
         }],
     }
 

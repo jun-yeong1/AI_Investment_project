@@ -35,6 +35,60 @@ FUNDING_WINDOW_YEARS = 2
 # RAG
 DOC_TYPES = ("regulation", "tech", "market")
 
+# RAG 원본 문서 (data/raw). file은 접두어가 아니라 파일명 전체.
+# doc = RagHit.doc(문서명), lang = 질문·BM25 토큰화 기준, ocr = 텍스트 층이 없는 스캔본
+# line_numbers = 본문 왼쪽 줄번호가 텍스트에 섞여 있는 문서
+RAG_SOURCES = [
+    {
+        "doc_id": "fda-ai-2025",
+        "file": "FDA 「Considerations for the Use of AI to Support Regulatory Decision-Making for Drug and Biological Products」(2025).pdf",
+        "doc": "FDA Considerations for the Use of AI to Support Regulatory Decision-Making for Drug and Biological Products (2025)",
+        "doc_type": "regulation", "lang": "en", "line_numbers": True,
+    },
+    {
+        "doc_id": "kistep-2025",
+        "file": "KISTEP 「AI를 활용한 혁신 신약개발의 동향 및 정책 시사점」(2025).pdf",
+        "doc": "KISTEP AI를 활용한 혁신 신약개발의 동향 및 정책 시사점 (2025)",
+        "doc_type": "tech", "lang": "ko",
+    },
+    {
+        "doc_id": "jayatunga-2024",
+        "file": "Jayatunga et al.「How successful are AI-discovered drugs in clinical trials?」(2024).pdf",
+        "doc": "Jayatunga et al. How successful are AI-discovered drugs in clinical trials? (2024)",
+        "doc_type": "tech", "lang": "en",
+    },
+    {
+        "doc_id": "kribb-2025",
+        "file": "AI신약개발.pdf",
+        "doc": "한국생명공학연구원 AI신약개발 분야 기술경쟁력 및 정부 R&D 투자현황 분석 (2025)",
+        "doc_type": "tech", "lang": "ko", "ocr": True,
+    },
+    {
+        "doc_id": "bio-2021",
+        "file": "ClinicalDevelopmentSuccessRates2011_2020.pdf",
+        "doc": "BIO Clinical Development Success Rates 2011-2020 (2021)",
+        "doc_type": "market", "lang": "en",
+    },
+    {
+        "doc_id": "fsc-2023",
+        "file": "230727 (별첨2) 기술특례상장 제도 개선 방안.pdf",
+        "doc": "관계기관 합동 기술특례상장 제도 개선 방안 (2023)",
+        "doc_type": "market", "lang": "ko",
+    },
+]
+
+RAG_EMBEDDING_MODEL = "BAAI/bge-m3"   # 평가셋 결과로 최종 확정
+RAG_CHUNK_SIZE = 1000                 # 비교 후보: 500 · 1000 · 1500
+RAG_CHUNK_OVERLAP = 150
+RAG_MIN_CHUNK_CHARS = 30              # 이보다 짧은 청크(머리말 찌꺼기 등)는 버린다
+RAG_OCR_MIN_CHARS = 30                # 쪽 텍스트가 이보다 짧으면 OCR로 대체
+RAG_OCR_LANG = "kor+eng"
+RAG_OCR_DPI = 300
+RAG_TOP_K = 5
+RAG_MIN_SIMILARITY = 0.55             # dense 코사인 유사도 하한. 미만이면 관련 없음
+                                      # (bge-m3 실측: 무관 질문 최대 0.50 · 관련 질문 1위 0.57~0.70)
+RAG_FUSION_WEIGHTS = (1.0, 1.0)       # (dense, BM25) RRF 가중치. 평가셋으로 비교 후 확정
+
 def today() -> str:
     return date.today().isoformat()
 

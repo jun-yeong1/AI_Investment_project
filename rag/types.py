@@ -12,6 +12,5 @@ class RagHit(TypedDict):
     score: float
 
 
-# rag_search(query: str, doc_type: DocType) -> list[RagHit]
-# 검색 실패·관련 없음은 예외 대신 빈 리스트 []로 알린다.
-# 웹 보강 여부는 호출한 Agent가 [] 를 보고 판단한다.
+# 설계서 B-2: 관련성이 낮으면 질문을 1회 재작성하고, 그래도 낮으면 웹 검색으로 보강한다.
+# rag_search의 최종 반환 타입은 웹 보강 결과 표현까지 포함해 RAG·Agent 팀이 확정한다.

@@ -17,6 +17,13 @@ CHAPTER_ITEMS = {
     "chapter2": ("sales", "competition", "exit"),
     "chapter3": ("technology", "stage", "manufacturing", "regulation", "overseas", "litigation"),
 }
+AREA_NAMES = {"company": "기업", "tech": "기술", "regulation": "규제", "market": "시장"}
+
+
+def _humanize_areas(value: str) -> str:
+    for code, name in AREA_NAMES.items():
+        value = value.replace(f"영역 {code}", f"영역 {name}")
+    return value
 
 
 def _evaluation(state: State, company_id: str) -> dict:
@@ -57,10 +64,10 @@ def _summary(company: dict, evaluation: dict) -> list[str]:
         f"{evaluation['verdict']} | {company['name']} | 합계 {evaluation['total']:+d}점 "
         f"| 환산 {evaluation['score100']}/100점",
     ]
-    reasons = list(evaluation.get("reasons", []))[:3]
+    reasons = [_humanize_areas(reason) for reason in evaluation.get("reasons", [])[:3]]
     supplements = [
         f"관문: {', '.join(g['name'] for g in evaluation.get('gates', {}).values() if g.get('ok')) or '충족 근거 없음'}",
-        f"확인된 영역: {', '.join(a for a, v in evaluation.get('areas', {}).items() if v.get('confirmed')) or '없음'}",
+        f"확인된 영역: {', '.join(AREA_NAMES.get(a, a) for a, v in evaluation.get('areas', {}).items() if v.get('confirmed')) or '없음'}",
         f"합계 기준: +{VERDICT_THRESHOLD}점",
     ]
     for supplement in supplements:
@@ -69,7 +76,8 @@ def _summary(company: dict, evaluation: dict) -> list[str]:
         reasons.append(supplement)
     lines.extend(f"판정 이유 {i}. {reason} (→ 4장)" for i, reason in enumerate(reasons, 1))
     reconsider = evaluation.get("reconsider", [])
-    lines.append("재검토 조건: " + ("; ".join(reconsider) if reconsider else "현재 판정 기준상 없음"))
+    lines.append("재검토 조건: " + ("; ".join(_humanize_areas(r) for r in reconsider)
+                                if reconsider else "현재 판정 기준상 없음"))
     return lines
 
 
@@ -137,11 +145,11 @@ def build_qualified_sections(state: State) -> dict[str, Any]:
             "평가표의 출처 표시는 항목별 대표 인용 1건이며, 점수는 judge의 전체 근거 ID로 계산했다.",
             "관문: " + "; ".join(f"{v['name']} {v['score']:+d}점/{v['status']}"
                                    for v in gates.values()),
-            "영역: " + "; ".join(f"{area} {'확인' if value['confirmed'] else '미확인'}"
+            "영역: " + "; ".join(f"{AREA_NAMES.get(area, area)} {'확인' if value['confirmed'] else '미확인'}"
                                    for area, value in areas.items()),
             f"최종 판정: {evaluation['verdict']} ({evaluation['total']:+d}점, "
             f"{evaluation['score100']}/100점).",
-        ] + [f"판정 사유: {reason}" for reason in evaluation.get("reasons", [])],
+        ] + [f"판정 사유: {_humanize_areas(reason)}" for reason in evaluation.get("reasons", [])],
     }
 
     by_status: dict[str, list[str]] = defaultdict(list)
@@ -180,16 +188,42 @@ def build_no_qualified_sections(state: State) -> dict[str, Any]:
         raise ValueError("모든 후보의 judge 평가가 끝나야 합니다")
     ordered = [evaluations[c["company_id"]] for c in candidates]
     missing = Counter(limit["status"] for e in ordered for limit in e.get("limits", []))
+
+    def comparison_note(evaluation: dict) -> str:
+        missing_gates = [gate["name"] for gate in evaluation.get("gates", {}).values()
+                         if not gate.get("ok")]
+        missing_areas = [AREA_NAMES.get(area, area) for area, status in evaluation.get("areas", {}).items()
+                         if not status.get("confirmed")]
+        reasons = []
+        if evaluation["verdict"] == "부적격":
+            reasons.extend(_humanize_areas(reason) for reason in evaluation.get("reasons", [])[:2])
+        else:
+            if missing_gates:
+                reasons.append(f"관문 {', '.join(missing_gates)} 확인 근거 부족")
+            if missing_areas:
+                reasons.append(f"{', '.join(missing_areas)} 영역 확인 근거 부족")
+            if evaluation["total"] < VERDICT_THRESHOLD:
+                reasons.append(f"기준 +{VERDICT_THRESHOLD}점 미달")
+        if not reasons:
+            reasons = [_humanize_areas(reason) for reason in evaluation.get("reasons", [])[:2]]
+        revisit = []
+        if missing_gates:
+            revisit.append(f"{', '.join(missing_gates)} 관문을 독립 자료로 +1 이상 확인")
+        if missing_areas:
+            revisit.append(f"{', '.join(missing_areas)} 영역의 확인됨 근거 확보")
+        if evaluation["total"] < VERDICT_THRESHOLD:
+            revisit.append(f"합계 +{VERDICT_THRESHOLD}점 이상 확보")
+        if not revisit:
+            revisit = [_humanize_areas(reason) for reason in evaluation.get("reconsider", [])[:2]]
+        return (f"{evaluation['name']}: 판정 사유 — {'; '.join(reasons) or '기록 없음'}. "
+                f"재검토 조건 — {'; '.join(revisit) or '판정 원인 해소 후 재평가'}.")
+
     chapter4 = {
         "rows": [{
             "item": e["name"], "score": e["total"], "status": e["verdict"],
             "citation": f"{e['score100']}/100",
         } for e in ordered],
-        "notes": [
-            f"{e['name']}: 판정 이유 — {'; '.join(e.get('reasons', [])) or '기록 없음'} / "
-            f"재검토 조건 — {'; '.join(e.get('reconsider', [])) or '없음'}"
-            for e in ordered
-        ],
+        "notes": [comparison_note(e) for e in ordered],
     }
     return {
         "kind": "no_qualified",

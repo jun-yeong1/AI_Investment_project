@@ -2,7 +2,7 @@ import pytest
 
 from config import GATE_ITEMS, ITEMS
 from judge.node import build_prompt, summarize
-from judge.scorer import decide, derive_status, sensitivity, to_100, to_score, score_item
+from judge.scorer import report_facts, decide, derive_status, sensitivity, to_100, to_score, score_item
 
 
 def a(status, q1=False, q2=False, q3=False, q4=False):
@@ -113,3 +113,13 @@ def test_evidence_only_counts_for_its_own_item():
            "q4_concern": False, "evidence_ids": ["e1"]}
     r = score_item(ans, by_id)                # technology 근거를 regulation에 쓰면 인정 안 됨
     assert r["status"] == "찾지 못함" and r["score"] == 0 and r["evidence_ids"] == []
+
+
+def test_report_facts():
+    scores = make_scores(1, technology=(1, "기업 주장만"), sales=(0, "찾지 못함"))
+    for c in scores:
+        scores[c]["reason"] = "r"
+    f = report_facts(scores)
+    assert f["gates"]["technology"]["ok"] is False and f["gates"]["regulation"]["ok"] is True
+    assert all(v["confirmed"] for v in f["areas"].values())
+    assert {x["item"] for x in f["limits"]} == {"technology", "sales"}

@@ -91,3 +91,17 @@ def sensitivity(scores: dict) -> dict:
     thresholds = sorted({*SENSITIVITY_THRESHOLDS, VERDICT_THRESHOLD})
     return {f"+{t}, 영역규칙 {'적용' if r else '미적용'}": decide(scores, t, r)["verdict"]
             for t, r in product(thresholds, (True, False))}
+
+
+def report_facts(scores: dict) -> dict:
+    """보고서 4장(관문 · 영역 확인)과 5장(한계점)에 필요한 값. 판정 코드가 이미 쓰는 기준을 그대로 노출한다."""
+    gates = {g: {"name": ITEMS[g][0], "status": scores[g]["status"], "score": scores[g]["score"],
+                 "ok": scores[g]["status"] == CONFIRMED and scores[g]["score"] >= 1}
+             for g in GATE_ITEMS}
+    areas = {area: {"confirmed": any(scores[c]["status"] == CONFIRMED
+                                      for c, v in ITEMS.items() if v[1] == area),
+                    "items": [c for c, v in ITEMS.items() if v[1] == area]}
+             for area in AREAS}
+    limits = [{"item": c, "name": ITEMS[c][0], "status": s["status"], "reason": s["reason"]}
+              for c, s in scores.items() if s["status"] != CONFIRMED]
+    return {"gates": gates, "areas": areas, "limits": limits}

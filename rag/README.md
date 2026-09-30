@@ -1,14 +1,15 @@
 # RAG 모듈 — 에이전트 팀 사용법
 
-## 1. 준비 (처음 한 번)
+## 1. 준비
 
 ```bash
 pip install -r requirements.txt
-python -m rag.prepare          # 문서 받기 → 파싱 → bge-m3 인덱스 (첫 실행 때 모델 약 2.3GB 다운로드)
-# 표 · 그림 비전 전사는 저장소의 캐시(data/processed/vision/)를 쓰므로 API를 다시 부르지 않는다
 ```
 
-준비(`rag.prepare`)는 API 키 없이 돈다. 검색(`rag_search`)의 질문 생성 · 관련성 채점에는 `.env`의 `OPENAI_API_KEY`가 필요하다.
+청크(`data/processed/chunks_r500.jsonl`)와 FAISS 색인(`data/index/bge-m3_r500/`)이 저장소에 들어 있어 **문서 임베딩 없이 바로 검색된다**.
+첫 검색 때 질문을 임베딩할 bge-m3 모델만 한 번 내려받는다.
+
+처음부터 다시 만들려면 `python -m rag.prepare` (PDF → 텍스트화 → 청킹 → 임베딩 → 색인, API 키 불필요 — 표 · 그림 전사는 저장소 캐시 사용). 검색(`rag_search`)의 질문 생성 · 관련성 채점에는 `.env`의 `OPENAI_API_KEY`가 필요하다.
 원본 PDF 6종은 모두 `data/raw/`에 들어 있다.
 
 ## 2. 에이전트에서 쓰기 (계약: `rag/types.py`)

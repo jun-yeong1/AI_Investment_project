@@ -202,7 +202,6 @@ flowchart TD
 ```
 AI_Investment_project-develop/
 ├── agents/                    # 조사 에이전트 모듈(통합 예정)
-│   ├── __init__.py            # 패키지 설명 (기업별 조사 노드)
 │   ├── common.py              # 공통 조사 로직 (검색 · 원문 검증 · 근거 변환)
 │   ├── select_candidate.py    # 평가 순서대로 다음 기업 선택
 │   ├── company.py             # 경영진 · 자금 조달 · 평판 조사

@@ -188,6 +188,20 @@ def build_no_qualified_sections(state: State) -> dict[str, Any]:
         raise ValueError("모든 후보의 judge 평가가 끝나야 합니다")
     ordered = [evaluations[c["company_id"]] for c in candidates]
     missing = Counter(limit["status"] for e in ordered for limit in e.get("limits", []))
+    citations = CitationIndex()
+    company_evidence = {
+        candidate["company_id"]: [e for e in state.get("evidence", [])
+                                  if e.get("company_id") == candidate["company_id"]]
+        for candidate in candidates
+    }
+
+    def fact_line(candidate: dict, codes: tuple[str, ...], fallback: str) -> str:
+        evidence = company_evidence[candidate["company_id"]]
+        item = next((e for code in codes for e in evidence if e.get("item") == code), None)
+        if item:
+            return (f"{candidate['name']}: {item['fact']} ({item['status']}) "
+                    f"{citations.cite(item)}")
+        return f"{candidate['name']}: {fallback}"
 
     def comparison_note(evaluation: dict) -> str:
         missing_gates = [gate["name"] for gate in evaluation.get("gates", {}).values()
@@ -225,40 +239,40 @@ def build_no_qualified_sections(state: State) -> dict[str, Any]:
         } for e in ordered],
         "notes": [comparison_note(e) for e in ordered],
     }
+    chapter1 = ["평가 대상: " + " → ".join(c["name"] for c in candidates)]
+    chapter1 += [fact_line(c, ("management", "funding", "reputation"),
+                           "기업·팀 관련 원문 근거를 확보하지 못함.") for c in candidates]
+    chapter2 = [fact_line(c, ("sales", "competition", "exit"),
+                          "시장·사업화 관련 원문 근거를 확보하지 못함.") for c in candidates]
+    chapter3 = [fact_line(c, ("technology", "stage", "regulation", "manufacturing", "overseas", "litigation"),
+                          "기술·규제 관련 원문 근거를 확보하지 못함.") for c in candidates]
+    chapter3 += [f"{e['name']} 관문: " + "; ".join(
+        f"{gate['name']} {gate['score']:+d}점/{gate['status']}"
+        for gate in e.get("gates", {}).values()) for e in ordered]
+    chapter5 = [
+        f"평가 항목 상태 합계: 찾지 못함 {missing['찾지 못함']}건, "
+        f"상충함 {missing['상충함']}건, 기업 주장만 {missing['기업 주장만']}건.",
+        "비상장 기업은 공개 정보가 제한되어 자료 부재를 부정 사실로 단정할 수 없다.",
+        "LLM이 추출한 사실·분류와 근거 상태는 투자 실행 전에 원문과 재대조해야 한다.",
+    ]
+    summary = [
+        f"적격 없음 | 평가 후보 {len(candidates)}곳",
+        f"판정 이유 1. 기준 +{VERDICT_THRESHOLD}점과 관문·영역 규칙을 모두 충족한 기업 없음 (→ 4장)",
+        "판정 이유 2. 기업별 미충족 조건은 4장 비교표에 정리 (→ 4장)",
+        "판정 이유 3. 찾지 못한 정보와 기업 주장만인 항목은 5장에서 구분 (→ 5장)",
+        "재검토 조건: 각 기업의 4장 조건에 해당하는 독립 원문 근거 확보.",
+    ]
     return {
         "kind": "no_qualified",
         "title": "AI 신약개발 스타트업 투자 심사 — 적격 없음",
         "company_id": None,
-        "summary": [
-            f"적격 없음 | 평가 후보 {len(candidates)}곳",
-            f"판정 이유 1. 기준 +{VERDICT_THRESHOLD}점과 관문·영역 규칙을 모두 충족한 기업 없음 (→ 4장)",
-            "판정 이유 2. 기업별 미충족 조건은 4장 비교표에 정리 (→ 4장)",
-            "판정 이유 3. 찾지 못한 정보와 기업 주장만인 항목은 5장에서 구분 (→ 5장)",
-            "재검토 조건: 각 기업의 4장 조건에 해당하는 독립 원문 근거 확보.",
-        ],
-        "chapter1": [
-            "평가 대상: " + " → ".join(c["name"] for c in candidates),
-            "기업별 사업·팀 사실은 개별 조사 근거에 한하며, 이 비교본에는 미검증 사실을 추가하지 않는다.",
-        ],
-        "chapter2": [
-            f"{e['name']}: 시장·사업화 영역 "
-            f"{'확인됨 근거 있음' if e.get('areas', {}).get('market', {}).get('confirmed') else '확인됨 근거 부족'}"
-            for e in ordered
-        ],
-        "chapter3": [
-            f"{e['name']}: " + "; ".join(
-                f"{g['name']} {g['score']:+d}점/{g['status']}"
-                for g in e.get("gates", {}).values()
-            ) for e in ordered
-        ],
+        "summary": summary,
+        "chapter1": chapter1,
+        "chapter2": chapter2,
+        "chapter3": chapter3,
         "chapter4": chapter4,
-        "chapter5": [
-            f"평가 항목 상태 합계: 찾지 못함 {missing['찾지 못함']}건, "
-            f"상충함 {missing['상충함']}건, 기업 주장만 {missing['기업 주장만']}건.",
-            "비상장 기업은 공개 정보가 제한되어 자료 부재를 부정 사실로 단정할 수 없다.",
-            "LLM이 추출한 사실·분류와 근거 상태는 투자 실행 전에 원문과 재대조해야 한다.",
-        ],
-        "references": [],  # 이 비교본에는 개별 외부 자료의 사실을 직접 인용하지 않는다.
+        "chapter5": chapter5,
+        "references": citations.entries,
     }
 
 

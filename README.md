@@ -50,10 +50,10 @@
 
 - **Language**: Python
 - **Framework**: LangGraph, LangChain
-- **LLM / Generator**: Gpt4o-mini
-- **LLM / Relevance Grader**: Gpt4o-mini
-- **LLM / Vision Parser**: Gpt4o-mini
-- **LLM / Judge**: Gpt4o-mini
+- **LLM / Generator**: 추후 작성 (조사 에이전트 통합 후)
+- **LLM / Relevance Grader**: GPT-4o-mini
+- **LLM / Vision Parser**: GPT-4.1-mini
+- **LLM / Judge**: GPT-4.1-mini
 - **PDF Parsing**: PyMuPDF
 - **Retrieval**: FAISS — Hit Rate@3 **0.824**, MRR **0.703**
 - **Embedding**: `BAAI/bge-m3`
@@ -141,7 +141,7 @@ AI 플랫폼의 기술 검증 수준과 신약 파이프라인을 조사합니�
 
 Judge LLM은 항목마다 네 질문에 예·아니오로 답하고 근거 ID를 선택합니다.
 
-1. `2` 기준의 나쁜 사실이 확인되었는가?
+1. `-2` 기준의 나쁜 사실이 확인되었는가?
 2. `+2` 기준의 사실이 확인된 근거로 존재하는가?
 3. `+2` 기준의 일부만 있거나 기업 주장만 존재하는가?
 4. 지연·축소·분쟁 조짐과 같은 우려 신호가 있는가?

@@ -248,8 +248,11 @@ def research(
     for query in (*web_fallback_queries, *queries):
         if pages_read >= MAX_PAGES_PER_NODE:
             break
-        for url in list(_urls(services.web_search(query)))[:MAX_URLS_PER_QUERY]:
-            if url in seen_urls or pages_read >= MAX_PAGES_PER_NODE:
+        pages_for_query = 0
+        for url in _urls(services.web_search(query)):
+            if pages_for_query >= MAX_URLS_PER_QUERY or pages_read >= MAX_PAGES_PER_NODE:
+                break
+            if url in seen_urls:
                 continue
             seen_urls.add(url)
             try:
@@ -260,6 +263,7 @@ def research(
             if not page.text.strip():
                 continue
             pages_read += 1
+            pages_for_query += 1
             analysis = services.extract(area, company_name, items, page, rag_context)
             if not isinstance(analysis, PageAnalysis):
                 analysis = PageAnalysis.model_validate(analysis)

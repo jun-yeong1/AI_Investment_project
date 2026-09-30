@@ -53,6 +53,18 @@ class WebToolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fetch_page(response.url)
 
+    @patch("tools.web.requests.get")
+    def test_fetch_page_uses_body_when_article_is_empty(self, get):
+        response = Mock()
+        response.url = "https://example.org/article"
+        response.headers = {"Content-Type": "text/html"}
+        response.content = (
+            b"<html><body><article><span></span></article>"
+            b"<section>Clinical update</section></body></html>"
+        )
+        get.return_value = response
+        self.assertIn("Clinical update", fetch_page(response.url)["text"])
+
     def test_fetch_page_rejects_non_http_url(self):
         with self.assertRaises(ValueError):
             fetch_page("file:///tmp/private")

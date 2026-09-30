@@ -1,6 +1,7 @@
 """실제 웹·RAG 서비스 없이 조사 노드의 계약과 협업을 검증한다."""
 
 import unittest
+from unittest.mock import patch
 
 from langgraph.graph import END, START, StateGraph
 
@@ -45,6 +46,30 @@ def merge(state, update):
 
 
 class AgentContractTests(unittest.TestCase):
+    def test_failed_source_tries_next_result_without_using_page_limit(self):
+        first = "https://example.org/empty"
+        second = "https://example.org/article"
+        fetched = []
+
+        def fetch_page(url):
+            fetched.append(url)
+            if url == first:
+                raise ValueError("원문 텍스트를 추출하지 못했습니다")
+            return FetchedPage(url, "스탠다임 창업자는 제약사 경력이 있다.", None, "2026-09-30")
+
+        services = ResearchTools(
+            web_search=lambda query: [{"url": first}, {"url": second}],
+            fetch_page=fetch_page,
+            extract=lambda *args: PageAnalysis.model_validate({"findings": [
+                {"item": "management", "fact": "제약사 경력", "quote": "제약사 경력이 있다", "status": "확인됨"}
+            ]}),
+        )
+        with patch("agents.common.MAX_URLS_PER_QUERY", 1):
+            result = company_node({"company": CANDIDATES[0]}, tools=services)
+
+        self.assertEqual(fetched[:2], [first, second])
+        self.assertEqual(result["evidence"][0]["source"], second)
+
     def test_candidate_order_and_reset(self):
         state = {"candidates": CANDIDATES, "current_idx": -1, "evidence": []}
         selected = []

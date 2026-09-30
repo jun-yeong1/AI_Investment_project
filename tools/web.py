@@ -131,9 +131,14 @@ def _html_text(content: bytes) -> tuple[str, str | None]:
     published = _published_date(soup)
     for element in soup(["script", "style", "noscript", "nav", "footer", "aside", "form"]):
         element.decompose()
-    body = soup.find("article") or soup.find("main") or soup.body or soup
-    lines = [" ".join(line.split()) for line in body.get_text("\n", strip=True).splitlines()]
-    text = "\n".join(line for line in lines if line)
+    text = ""
+    for body in (soup.find("article"), soup.find("main"), soup.body, soup):
+        if body is None:
+            continue
+        lines = [" ".join(line.split()) for line in body.get_text("\n", strip=True).splitlines()]
+        text = "\n".join(line for line in lines if line)
+        if text:
+            break
     return text, published
 
 

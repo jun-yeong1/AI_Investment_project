@@ -37,3 +37,7 @@ DOC_TYPES = ("regulation", "tech", "market")
 
 def today() -> str:
     return date.today().isoformat()
+
+# 투자 판단 LLM
+JUDGE_MODEL = "gpt-4.1-mini"
+JUDGE_PROVIDER = "openai"

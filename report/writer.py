@@ -197,8 +197,13 @@ def _sensitivity_text(names: list[str], ordered: list[dict]) -> str | None:
 
 # ---------- 본문 만들기 ----------
 
+# 표의 빈 칸("No Data", "-")만 따온 인용은 어떤 문장도 뒷받침하지 못한다
+EMPTY_QUOTE = re.compile(r"^\W*(?:no data|n/?a|none|null|정보\s*없음)?\W*$", re.IGNORECASE)
+
+
 def _citable(evidence: dict) -> bool:
-    return bool(evidence.get("source") and evidence.get("fact") and evidence.get("status") != "찾지 못함")
+    return bool(evidence.get("source") and evidence.get("fact") and evidence.get("status") != "찾지 못함"
+                and not EMPTY_QUOTE.match(str(evidence.get("quote") or "")))
 
 
 BLOG_HOSTS = ("blog.naver.com", "tistory.com", "brunch.co.kr", "post.naver.com", "medium.com", "velog.io")
@@ -528,7 +533,7 @@ def _quote_line(line: dict, evidence_by_id: dict[str, dict], references: list[di
     for evidence_id in line.get("evidence_ids") or []:
         quote = _plain((evidence_by_id.get(evidence_id) or {}).get("quote"))
         number = _reference_number(evidence_id, line, references)
-        if quote and number:
+        if quote and number and not EMPTY_QUOTE.match(quote):
             label = f"{head}: " if head else ""
             tail = f" {status.group(0)}" if status else ""
             line.update(text=f'{label}원문 — "{quote}"{tail} [{number}]', evidence_ids=[evidence_id],

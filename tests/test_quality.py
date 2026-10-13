@@ -560,7 +560,9 @@ def test_prompt_defines_both_judgments():
 
 
 
-def test_hype_words_are_caught_by_rule_even_if_judge_passes():
+@pytest.mark.parametrize("claim", ["글로벌 최고 수준의 기술력을 확보했다.",
+                                   "임상 1상에서 우수한 안전성 프로파일을 확보하며 순조롭게 진행 중이다."])
+def test_hype_words_are_caught_by_rule_even_if_judge_passes(claim):
     """LLM Judge가 통과시켜도 과장 수식어는 규칙이 잡아 재작성 대상으로 넘긴다."""
     import quality.evaluator as qe
 
@@ -569,7 +571,7 @@ def test_hype_words_are_caught_by_rule_even_if_judge_passes():
         "summary": [{"id": "sum-001", "kind": "note", "company_id": None, "text": "보류 1곳", "evidence_ids": [], "citations": []}],
         "chapters": [{"key": "chapter1", "title": "1", "lines": [
             {"id": "ch1-001", "kind": "fact", "company_id": "galux",
-             "text": "갤럭스 · 기술: 글로벌 최고 수준의 기술력을 확보했다. (기업 주장만) [1]",
+             "text": f"갤럭스 · 기술: {claim} (기업 주장만) [1]",
              "evidence_ids": ["galux-technology-001"], "citations": [1]},
         ]}, {"key": "chapter5", "title": "5", "lines": [
             {"id": "ch5-001", "kind": "note", "company_id": "galux", "text": "갤럭스: 단일 출처 의존, 기업 주장만 1개",

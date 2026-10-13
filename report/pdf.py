@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date
 from pathlib import Path
 from typing import Iterable
@@ -37,9 +38,26 @@ def _text_width(value: str, size: float) -> float:
     return pymupdf.get_text_length(value, fontname=FONT_NAME, fontsize=size)
 
 
+GLYPH_FALLBACK = {"‧": "·", "®": "(R)"}
+
+
+def _printable(word: str) -> str:
+    """글꼴에 없는 글자는 빈 칸으로 찍히므로 같은 뜻의 글자로 바꾼다(마이크로 기호 µ -> 그리스 문자 μ 등)."""
+    if FONT is None:
+        return word
+
+    def swap(char: str) -> str:
+        if FONT.has_glyph(ord(char)):
+            return char
+        alt = GLYPH_FALLBACK.get(char) or unicodedata.normalize("NFKC", char)
+        return alt if all(FONT.has_glyph(ord(c)) for c in alt) else "?"
+
+    return "".join(swap(char) for char in word)
+
+
 def _wrap(text: str, width: float, size: float) -> list[str]:
     """한글 문장과 공백 없는 URL을 모두 페이지 폭 안에서 줄바꿈한다."""
-    words = str(text).split()
+    words = [_printable(word) for word in str(text).split()]
     if not words:
         return [""]
     lines: list[str] = []

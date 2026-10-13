@@ -277,11 +277,19 @@ def test_unusable_evidence_is_never_cited():
         make_evidence(cid, "funding", 1, fact=""),
         {**make_evidence(cid, "reputation", 1), "source": ""},
         {**make_evidence("diagen", "management", 1)},
+        make_evidence(cid, "regulation", 1, quote="No Data"),   # 표의 빈 칸만 따온 인용
         make_evidence(cid, "technology", 1, status="확인됨"),
     ]
     sections = build_sections(one_company_state(evidence), no_summary)
     cited = {i for line in all_lines(sections) for i in line["evidence_ids"]}
     assert cited == {"standigm-technology-001"}
+
+
+def test_characters_missing_from_font_are_swapped():
+    from report.pdf import _printable
+
+    assert _printable("IC50<1µM") == "IC50<1μM"   # 마이크로 기호 -> 그리스 문자 뮤
+    assert "\x00" not in _printable("A‧B®")
 
 
 def test_fact_text_rules():

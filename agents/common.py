@@ -15,7 +15,7 @@ from dotenv import dotenv_values, load_dotenv
 from langchain_core.runnables.config import ContextThreadPoolExecutor
 from pydantic import BaseModel, Field
 
-from config import JUDGE_MODEL, JUDGE_PROVIDER, today
+from config import JUDGE_MODEL, JUDGE_PROVIDER, SOURCE_DOMAINS, today
 from state import State
 from tools.evidence import Evidence, PipelineItem, make_evidence_id
 
@@ -108,6 +108,15 @@ def _own_site(url: str, aliases: Iterable[str]) -> bool:
     return any(len(_compact(alias)) >= 4 and _compact(alias) in host for alias in aliases)
 
 
+def _search(services: "ResearchTools", query: str, domains: list[str] | None) -> Any:
+    if not domains:
+        return services.web_search(query)
+    try:
+        return services.web_search(query, include_domains=domains)
+    except TypeError:  # 도메인 지정을 모르는 검색 도구(테스트용 가짜 등)는 일반 검색으로
+        return services.web_search(query)
+
+
 def _urls(search_result: Any) -> Iterable[str]:
     # 검색 결과의 스니펫은 버리고 fetch_page에 전달할 URL만 취한다.
     if isinstance(search_result, Mapping):
@@ -189,6 +198,7 @@ def extract_with_llm(
         " 독립 기관의 확인·독립 보도가 아닌 기업 홈페이지·보도자료 및 이를 받아쓴 기사라면"
         " status를 '기업 주장만'으로 하세요. 정보가 없으면 추측하지 말고 빈 목록을 반환하세요."
         " 동일한 사실을 둘 이상의 항목에 넣지 마세요. RAG 참고자료는 기업 사실의 출처가 아닙니다."
+        " fact는 원문이 영어여도 한국어 한 문장으로 쓰고, quote는 원문 그대로 둡니다."
     )
     material = (
         f"기업: {company_name}\n원문 URL: {page.url}\n발행일: {page.published or '미확인'}"
@@ -234,6 +244,8 @@ def research(
         # supervisor가 부족한 항목을 겨냥해 준 검색어로 다시 찾는다. 기준 문서(RAG)는 첫 조사에서 이미 썼다.
         queries = list(task.get("queries") or queries)
         rag_query = None
+        # 재작업은 부족한 항목만 추출하게 좁힌다(다른 항목은 첫 조사에서 이미 다뤘다)
+        items = tuple(item for item in items if item in (task.get("target_items") or [])) or items
     services = tools or default_tools(with_rag=rag_query is not None)
     company_id, company_name = company["company_id"], company["name"]
     # 영어 원문(임상 등록 · 논문 · 해외 보도)은 영문명으로만 나오는 경우가 많다
@@ -245,7 +257,9 @@ def research(
         if services.rag_search is None:
             raise ValueError(f"{area} 조사에는 rag_search가 필요합니다")
         # RAG가 국문·영문 질문 생성, 관련성 채점, 1회 재작성을 처리한다.
-        rag_hits = services.rag_search(rag_query, area, pipeline=state.get("pipeline", []))
+        # 규제 · 시장은 지시로 받은 물질 목록, 기술은 자기가 모은 목록으로 기준 문서를 찾는다
+        task_pipeline = task.get("pipeline") if task.get("area") == area else None
+        rag_hits = services.rag_search(rag_query, area, pipeline=task_pipeline or state.get("pipeline", []))
         if not rag_hits:
             # RAG의 재검색까지 실패하면 기업명과 함께 웹 원문을 보강한다.
             web_fallback_queries = [f"{company_name} {rag_query}"]
@@ -259,8 +273,9 @@ def research(
 
     evidence: list[Evidence] = []
     pipeline: list[PipelineItem] = list(state.get("pipeline", [])) if include_pipeline else []
-    # 이미 읽은 원문은 재작업에서 다시 열지 않는다
-    seen_urls: set[str] = set(state.get("read_urls", []))
+    # 같은 영역이 이미 읽은 원문만 다시 열지 않는다. 다른 영역이 읽은 페이지는 이 영역 관점으로 다시 분석할 수 있다
+    read_by_area = state.get("read_urls") or {}
+    seen_urls: set[str] = set(read_by_area.get(area, []) if isinstance(read_by_area, dict) else [])
     read_now: list[str] = []
     pages: list[FetchedPage] = []
     pages_read = 0
@@ -271,11 +286,15 @@ def research(
     item_counts = {item: sum(1 for e in mine if e.get("item") == item) for item in items}
 
     # RAG가 실패한 항목의 웹 보강을 일반 기업 검색보다 먼저 수행한다.
-    for query in (*web_fallback_queries, *queries):
+    plan: list[tuple[str, list[str] | None]] = [(q, None) for q in (*web_fallback_queries, *queries)]
+    if rework and SOURCE_DOMAINS.get(area):
+        # 재작업은 같은 검색어를 공식 · 학술 출처 안에서 먼저 찾는다(독립 출처 = 확인됨을 얻는 지렛대)
+        plan = [(q, SOURCE_DOMAINS[area]) for q in queries] + plan
+    for query, domains in plan:
         if pages_read >= MAX_PAGES_PER_NODE:
             break
         pages_for_query = 0
-        for url in _urls(services.web_search(query)):
+        for url in _urls(_search(services, query, domains)):
             if pages_for_query >= MAX_URLS_PER_QUERY or pages_read >= MAX_PAGES_PER_NODE:
                 break
             if url in seen_urls:
@@ -355,7 +374,9 @@ def research(
                     seen_pipeline.add(key)
                     pipeline.append(PipelineItem(substance=key[0], indication=key[1], stage=key[2]))
 
-    result: dict[str, Any] = {"evidence": evidence, "read_urls": [*state.get("read_urls", []), *read_now]}
+    read_urls = dict(read_by_area) if isinstance(read_by_area, dict) else {}
+    read_urls[area] = [*read_urls.get(area, []), *read_now]
+    result: dict[str, Any] = {"evidence": evidence, "read_urls": read_urls}
     if include_pipeline:
         result["pipeline"] = pipeline
     return result

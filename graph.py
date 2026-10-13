@@ -8,7 +8,8 @@ import importlib
 
 from langgraph.graph import END, START, StateGraph
 
-from state import State
+from state import (JudgeInput, QualityInput, ReportInput, ResearchInput, SelectInput, State,
+                   TechInput)
 
 # 노드 이름 -> (모듈, 함수)
 NODE_SOURCES = {
@@ -23,6 +24,17 @@ NODE_SOURCES = {
     "quality":    ("quality.evaluator", "quality_node"),
 }
 WORKERS = [name for name in NODE_SOURCES if name != "supervisor"]
+# 워커가 받는 State 범위. supervisor는 전체를 본다(입력 범위 없음)
+INPUT_SCHEMAS = {
+    "select": SelectInput,
+    "company": ResearchInput,
+    "tech": TechInput,
+    "regulation": ResearchInput,
+    "market": ResearchInput,
+    "judge": JudgeInput,
+    "report": ReportInput,
+    "quality": QualityInput,
+}
 # 기업당 최대 약 10단계 x 4곳 + 보고서 · 품질 루프, supervisor 왕복까지 2배. 실제 종료는 State의 max_steps가 보장한다
 RECURSION_LIMIT = 300
 
@@ -43,7 +55,7 @@ def build_graph(nodes: dict | None = None, checkpointer=None):
 
     g = StateGraph(State)
     for name in NODE_SOURCES:
-        g.add_node(name, nodes[name])
+        g.add_node(name, nodes[name], input_schema=INPUT_SCHEMAS.get(name))
 
     g.add_edge(START, "supervisor")
     g.add_conditional_edges("supervisor", route, {**{name: name for name in WORKERS}, "FINISH": END})

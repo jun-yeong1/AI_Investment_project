@@ -114,7 +114,10 @@ class AgentContractTests(unittest.TestCase):
 
         merge(state, company_node(state, tools=company_tools))
         merge(state, tech_pipeline_node(state, tools=tech_tools))
+        # supervisor가 하듯 기술 워커의 물질 목록을 지시에 실어 규제 · 시장 워커를 부른다
+        state["task"] = {"area": "regulation", "mode": "initial", "pipeline": state["pipeline"]}
         merge(state, regulation_node(state, tools=regulation_tools))
+        state["task"] = {"area": "market", "mode": "initial", "pipeline": state["pipeline"]}
         merge(state, market_node(state, tools=market_tools))
 
         self.assertEqual(state["pipeline"], [{"substance": "ST-01", "indication": "폐암", "stage": "전임상"}])

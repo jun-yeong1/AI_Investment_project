@@ -9,7 +9,8 @@ ITEMS = tuple(item for item, (_, area, _) in RUBRIC_ITEMS.items() if area == "ma
 
 def market_node(state: State, *, tools: ResearchTools | None = None) -> dict:
     name = state["company"]["name"]
-    pipeline = (state.get("task") or {}).get("pipeline") or state.get("pipeline", [])
+    # 기술 워커의 물질 목록은 supervisor의 지시로만 받는다(워커끼리 State를 직접 주고받지 않음)
+    pipeline = (state.get("task") or {}).get("pipeline", [])
     queries = [f"{name} 기술이전 계약금 공동연구 파트너 상장 기술성평가"]
     # 시장 규모와 경쟁 약물은 파이프라인의 적응증별로 확인한다.
     for item in pipeline:

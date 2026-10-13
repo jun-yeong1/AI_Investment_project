@@ -199,28 +199,45 @@ def _citable(evidence: dict) -> bool:
     return bool(evidence.get("source") and evidence.get("fact") and evidence.get("status") != "찾지 못함")
 
 
-def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains: set[str]) -> dict | None:
-    """judge가 쓴 근거, 확인됨 순으로 고르고 순위가 같으면 이 기업이 아직 안 쓴 도메인을 고른다."""
-    pool = [e for e in candidates if e.get("item") == code]
+BLOG_HOSTS = ("blog.naver.com", "tistory.com", "brunch.co.kr", "post.naver.com", "medium.com", "velog.io")
+
+
+def _is_blog(source: str) -> bool:
+    return any(host in domain_of(source) for host in BLOG_HOSTS)
+
+
+def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains: set[str],
+          used_facts: set[str]) -> dict | None:
+    """judge가 쓴 근거, 확인됨 순으로 고르고 순위가 같으면 이 기업이 아직 안 쓴 도메인을 고른다.
+    다른 항목에서 이미 쓴 사실은 다시 쓰지 않고(중복), 개인 블로그는 2·3차 가공이라 뒤로 미룬다."""
+    pool = [e for e in candidates if e.get("item") == code and _fact_key(e) not in used_facts]
     if not pool:
         return None
     order = {evidence_id: n for n, evidence_id in enumerate(judged_ids)}
     return min(pool, key=lambda e: (
         e["id"] not in order,
         STATUS_RANK.get(e["status"], 3),
+        _is_blog(e["source"]),
         domain_of(e["source"]) in used_domains,
         order.get(e["id"], 0),
     ))
 
 
+def _fact_key(evidence: dict) -> str:
+    return re.sub(r"\W", "", str(evidence.get("fact", "")))[:60]
+
+
 def _fact_text(company: str, code: str, evidence: dict, number: int) -> str:
     # 기업 주장만인 근거도 언론 보도일 수 있어 "기업 발표"로 단정하지 않고 끝의 상태 표기로 구분한다
-    return f"{company} · {ITEMS[code][0]}: {_plain(evidence['fact'])} ({evidence['status']}) [{number}]"
+    # "내년" 같은 표현의 기준 시점을 알 수 있게 원문 발행일을 함께 적는다
+    dated = f", {evidence['published']} 자료" if evidence.get("published") else ""
+    return f"{company} · {ITEMS[code][0]}: {_plain(evidence['fact'])} ({evidence['status']}{dated}) [{number}]"
 
 
 def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[dict]],
                    scores: dict, citations: CitationIndex) -> list[dict]:
     domains: dict[str, set[str]] = {c["company_id"]: set() for c in candidates}
+    facts: dict[str, set[str]] = {c["company_id"]: set() for c in candidates}
     chapters = []
     for number, (key, title, codes) in enumerate(CHAPTERS, start=1):
         lines = _Lines(f"ch{number}")
@@ -229,11 +246,12 @@ def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[d
             absent = []
             for code in codes:
                 judged = scores.get(company_id, {}).get(code, {}).get("evidence_ids", [])
-                item = _pick(code, evidence_by_company[company_id], judged, domains[company_id])
+                item = _pick(code, evidence_by_company[company_id], judged, domains[company_id], facts[company_id])
                 if item is None:
                     absent.append(ITEMS[code][0])
                     continue
                 domains[company_id].add(domain_of(item["source"]))
+                facts[company_id].add(_fact_key(item))
                 cited = citations.add(item)
                 lines.add("fact", _fact_text(name, code, item, cited), company_id,
                           evidence_ids=[item["id"]], citations=[cited])
@@ -375,13 +393,16 @@ def build_sections(state: State, summarize_company: Summarize | None = None) -> 
     chapters = _item_chapters(candidates, evidence_by_company, scores, citations)
     chapters.append(_chapter4(candidates, ordered, evidence_by_company, citations, summarize_company))
     chapters.append(_chapter5(candidates, ordered, scores, chapters, evidence_by_id))
-    return {
+    sections = {
         "title": TITLE,
         "revision": 0,
         "summary": _summary_lines(candidates, ordered),
         "chapters": chapters,
         "references": citations.entries,
     }
+    _set_quality_note(sections, "자동 품질 평가: 이 보고서는 생성 뒤 근거성 · 중립성 · 편향 통제 · 형식을 검사받고, "
+                                "미달 문장만 최대 2회 고친다. 이 판은 첫 작성본이다.")
+    return sections
 
 
 # ---------- LLM ----------
@@ -520,6 +541,7 @@ def revise_sections(sections: dict, quality: dict, evidence_by_id: dict[str, dic
     flagged: dict[str, list[dict]] = {}
     for item in quality.get("flagged_lines") or []:
         flagged.setdefault(item.get("line_id"), []).append(item)
+    before = {line_id: lines[line_id]["text"] for line_id in flagged if line_id in lines}
 
     dropped: set[str] = set()
     requests: list[dict] = []
@@ -565,7 +587,32 @@ def revise_sections(sections: dict, quality: dict, evidence_by_id: dict[str, dic
             chapter["lines"] = [line for line in chapter["lines"] if line["id"] not in dropped]
     _prune_references(revised)
     revised["revision"] = revised.get("revision", 0) + 1
+    # 무엇을 왜 고쳤는지 남겨 루프가 실제로 보고서를 바꿨는지 확인할 수 있게 한다
+    changes = [{"revision": revised["revision"], "line_id": line_id,
+                "check": ", ".join(sorted({item.get("check", "") for item in flagged[line_id]})),
+                "reason": " / ".join(item.get("reason", "") for item in flagged[line_id]),
+                "before": text, "after": "(삭제)" if line_id in dropped else lines[line_id]["text"]}
+               for line_id, text in before.items()]
+    revised["changes"] = [*sections.get("changes", []), *changes]
+    counts = {check: sum(1 for c in changes if check in c["check"]) for check in ("groundedness", "neutrality")}
+    _set_quality_note(revised, f"자동 품질 평가: 직전 판에서 지적된 문장 {len(changes)}건(근거성 {counts['groundedness']}건 · "
+                               f"중립성 {counts['neutrality']}건)을 고친 {revised['revision']}차 수정판이다. "
+                               "근거성 지적 문장은 원문 인용으로 바꾸고, 중립성 지적 문장은 중립 표현으로 다시 썼다.")
     return revised
+
+
+QUALITY_NOTE_ID = "ch5-quality"
+
+
+def _set_quality_note(sections: dict, text: str) -> None:
+    """5장 끝의 품질 평가 이력 문장을 넣거나 바꾼다. 코드가 만드는 note라 인용이 없다."""
+    lines = sections["chapters"][-1]["lines"]
+    for line in lines:
+        if line["id"] == QUALITY_NOTE_ID:
+            line["text"] = text
+            return
+    lines.append({"id": QUALITY_NOTE_ID, "kind": "note", "company_id": None, "text": text,
+                  "evidence_ids": [], "citations": []})
 
 
 # ---------- 노드 ----------
@@ -592,7 +639,12 @@ def report_node(state: State, *, rewrite: Rewrite | None = None,
     path = OUTPUT_DIR / f"{trace_id}_report.pdf"
     # 재작성 전후를 비교할 수 있게 판마다 사본을 남기고, report_path는 항상 최신 판을 가리킨다
     version = path.with_name(f"{trace_id}_report_v{sections['revision']}.pdf")
-    pages = render_report(sections, version)
+    try:
+        pages = render_report(sections, version)
+    except ValueError as exc:
+        # 10쪽을 넘어도 그래프를 멈추지 않는다. 그대로 저장하고 품질 평가의 형식 규칙이 미달로 잡게 둔다
+        LOGGER.warning("%s", exc)
+        pages = render_report(sections, version, strict=False)
     shutil.copyfile(version, path)
     return {
         "report_sections": sections,

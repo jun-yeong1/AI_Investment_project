@@ -158,15 +158,16 @@ class _Report:
         for entry in entries:
             self.text(format_reference(entry), size=size, gap=gap, leading=leading)
 
-    def save(self, destination: Path) -> int:
+    def save(self, destination: Path, strict: bool = True) -> int:
         total = len(self.doc)
-        if total > MAX_PAGES:
+        if strict and total > MAX_PAGES:
             raise ValueError(f"보고서가 {total}쪽으로 최대 {MAX_PAGES}쪽을 넘었습니다. 인용·문장을 줄여야 합니다")
         for number, page in enumerate(self.doc, start=1):
             label = f"{number} / {total}"
             page.insert_text((PAGE_W - MARGIN - _text_width(label, 8), PAGE_H - 21), label,
                              fontsize=8, fontname=FONT_NAME, color=MUTED)
         self.doc.set_metadata({"title": self.title, "author": "AI Investment Project"})
+        self.doc.subset_fonts()  # 한글 글꼴 전체(약 6MB) 대신 쓴 글자만 넣는다
         self.doc.save(destination, garbage=4, deflate=True)
         return total
 
@@ -186,8 +187,8 @@ def _table_cells(rows: list[dict]) -> list[tuple[list[list[str]], float]]:
     return cells
 
 
-def render_report(sections: dict, path: str | Path) -> int:
-    """통합 보고서를 PDF로 저장하고 쪽수를 돌려준다. 10쪽을 넘으면 저장하지 않고 ValueError."""
+def render_report(sections: dict, path: str | Path, *, strict: bool = True) -> int:
+    """통합 보고서를 PDF로 저장하고 쪽수를 돌려준다. strict면 10쪽을 넘을 때 저장하지 않고 ValueError."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     report = _Report(sections["title"])
@@ -205,6 +206,6 @@ def render_report(sections: dict, path: str | Path) -> int:
             report.bullets(line["text"] for line in chapter["lines"])
         report.heading("REFERENCE")
         report.references(sections.get("references", []))
-        return report.save(destination)
+        return report.save(destination, strict)
     finally:
         report.doc.close()

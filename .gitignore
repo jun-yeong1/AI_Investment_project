@@ -25,3 +25,5 @@ data/index/*
 # 실행 산출물 — 체크포인트 DB · 실행 로그는 실행마다 새로 생긴다
 outputs/checkpoints.sqlite*
 outputs/logs/
+# 보고서 재작성 판별 사본 · 개발 중 실행 결과 — 최종 보고서만 올린다
+outputs/*_report_v*.pdf

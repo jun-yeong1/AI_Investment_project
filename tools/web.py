@@ -49,18 +49,20 @@ def _http_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
-def web_search(query: str, max_results: int = 5) -> list[dict[str, str]]:
-    """Tavily 검색 결과에서 URL과 제목만 반환한다."""
+def web_search(query: str, max_results: int = 5, include_domains: list[str] | None = None) -> list[dict[str, str]]:
+    """Tavily 검색 결과에서 URL과 제목만 반환한다. include_domains를 주면 그 사이트들 안에서만 찾는다."""
     if not query.strip():
         return []
     if max_results < 1:
         raise ValueError("max_results는 양수여야 합니다")
+    options = {"include_domains": include_domains} if include_domains else {}
     response = _client().search(
         query=query,
         search_depth="basic",
         max_results=max_results,
         include_answer=False,
         include_raw_content=False,
+        **options,
     )
     results: list[dict[str, str]] = []
     seen: set[str] = set()

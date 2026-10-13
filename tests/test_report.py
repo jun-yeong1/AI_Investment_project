@@ -206,7 +206,8 @@ def test_chapter5_limits_are_per_company(sections):
     assert "찾지 못함 8개" in by_company["drnoah"][0]
     assert any("소송 -1점" in t for t in by_company["diagen"])
     assert any("기술 -2점" in t for t in by_company["galux"])
-    assert len(by_company[None]) == 3
+    assert len(by_company[None]) == 4   # 공통 한계 3줄 + 품질 평가 이력 1줄
+    assert by_company[None][-1].startswith("자동 품질 평가")
 
 
 def test_sensitivity_line_when_nothing_changes(state):
@@ -291,8 +292,8 @@ def test_fact_text_rules():
     ]
     sections = build_sections(one_company_state(evidence), no_summary)
     lines = {line["id"]: line["text"] for line in sections["chapters"][0]["lines"]}
-    assert lines["ch1-001"] == ("스탠다임 · 경영진: 신약을 개발 중이다 라고 한다 (기업 주장만) [1]")
-    assert lines["ch1-002"] == "스탠다임 · 자금 조달: 2024년 시리즈 B를 유치했다. (확인됨) [2]"
+    assert lines["ch1-001"] == ("스탠다임 · 경영진: 신약을 개발 중이다 라고 한다 (기업 주장만, 2026-09-01 자료) [1]")
+    assert lines["ch1-002"] == "스탠다임 · 자금 조달: 2024년 시리즈 B를 유치했다. (확인됨, 2026-09-01 자료) [2]"
     assert lines["ch1-003"] == "스탠다임 · 평판: 원문 근거를 찾지 못함."
 
 
@@ -416,7 +417,7 @@ def test_reference_format_follows_assignment_style():
     assert format_reference(web) == ("[1] thebell.co.kr(2023-04-04). 스탠다임 대표 선임. "
                                      "thebell.co.kr, https://www.thebell.co.kr/front/news.asp?key=1")
     bare = {**web, "number": 2, "published": None, "title": None, "source": "https://m.blog.naver.com/a/1"}
-    assert format_reference(bare) == "[2] naver.com(n.d.). naver.com, https://m.blog.naver.com/a/1"
+    assert format_reference(bare) == "[2] naver.com(n.d.). naver.com, https://m.blog.naver.com/a/1 열람 2026-10-13."
     document = {"number": 3, "source": "FDA_expedited_programs_2014", "page": 12, "published": None, "title": None}
     assert format_reference(document) == "[3] FDA_expedited_programs_2014(n.d.). p.12"
 
@@ -529,7 +530,7 @@ def test_worst_case_volume_fits_in_ten_pages(tmp_path):
     for company in CANDIDATES:
         cid = company["company_id"]
         items = [make_evidence(cid, code, status="기업 주장만", host=f"news-{cid}-{code}.co.kr",
-                               fact=f"{company['name']}은 {long_fact}", quote=long_fact[:120],
+                               fact=f"{company['name']}의 {ITEMS[code][0]} — {long_fact}", quote=long_fact[:120],
                                title=f"{company['name']} {ITEMS[code][0]} 관련 보도 제목이 길게 이어지는 경우")
                  for code in ITEMS]
         evaluation, company_scores = judge(company, items, pos=tuple(ITEMS), concern=("litigation",))
@@ -583,8 +584,9 @@ def neutral_rewrite(requests):
 
 
 def changed_ids(before, after):
-    old = {line["id"]: line for line in all_lines(before)}
-    new = {line["id"]: line for line in all_lines(after)}
+    """지적받은 줄 중 바뀐 것. 5장 품질 평가 이력 문장은 판마다 바뀌므로 따로 확인한다."""
+    old = {line["id"]: line for line in all_lines(before) if line["id"] != writer.QUALITY_NOTE_ID}
+    new = {line["id"]: line for line in all_lines(after) if line["id"] != writer.QUALITY_NOTE_ID}
     return {i for i in old if i not in new or old[i] != new[i]}
 
 
@@ -781,7 +783,7 @@ def test_summary_prompt_carries_verdict_rules_and_trimmed_quotes(state):
     assert "판정 사유: 관문 기술, 법률·정책 확인 근거 부족" in prompt
     assert "재검토 조건: 기술, 법률·정책 관문을 독립 자료로 +1 이상 확인" in prompt
     assert "[diagen-technology-001] (기업 주장만)" in prompt and "가" * 150 in prompt and "가" * 151 not in prompt
-    for rule in ("평가 기준상 보류", "evidence_ids", "기업 주장만"):
+    for rule in ("판정 · 점수 · 판정 사유 · 재검토 조건은 쓰지 않는다", "evidence_ids", "기업 주장만"):
         assert rule in writer.SUMMARY_PROMPT
 
 

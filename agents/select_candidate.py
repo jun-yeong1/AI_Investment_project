@@ -21,7 +21,7 @@ def select_candidate(state: State) -> dict:
         # 조사 진행 상태도 기업 단위라 새 기업에서 처음부터 센다
         "area_status": {area: "pending" for area in AREAS},
         "rework_count": {},
-        "read_urls": [],
+        "read_urls": {},
     }
 
 

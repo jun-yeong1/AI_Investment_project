@@ -141,6 +141,7 @@ def _used_numbers(sections: dict, pairs: list[tuple[str, dict]]) -> set[int]:
 def _groundedness_rules(sections: dict, pairs: list[tuple[str, dict]],
                         evidence_by_id: dict[str, dict]) -> list[Issue]:
     numbers = {ref["number"] for ref in sections.get("references") or []}
+    refs = {ref["number"]: ref for ref in sections.get("references") or []}
     issues = []
     for _, line in pairs:
         if line.get("kind") != "fact":
@@ -157,6 +158,12 @@ def _groundedness_rules(sections: dict, pairs: list[tuple[str, dict]],
         if marked != cited:
             problems.append(f"본문 인용 {sorted(marked)}와 citations {sorted(cited)}가 다름")
         problems += [f"참고문헌에 없는 번호 [{n}]" for n in sorted(marked | cited) if n not in numbers]
+        # 번호가 달려 있어도 그 참고문헌이 이 문장의 근거를 가리켜야 근거성이 성립한다
+        for n in sorted(cited & set(refs)):
+            ref_ids = set(refs[n].get("evidence_ids") or [])
+            sources = {evidence_by_id[i].get("source") for i in ids if i in evidence_by_id}
+            if ref_ids and not ref_ids & set(ids) and refs[n].get("source") not in sources:
+                problems.append(f"참고문헌 [{n}]이 이 문장의 근거와 다른 출처를 가리킴")
         issues += [_issue("groundedness", problem, line=line) for problem in problems]
     for n in sorted(numbers - _used_numbers(sections, pairs)):
         issues.append(_issue("groundedness", f"참고문헌 [{n}]이 본문에서 쓰이지 않음"))
@@ -364,6 +371,14 @@ def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], repo
     items = _judge_items(pairs, evidence_by_id, names)
     results, failures = _run_judge(judge or llm_judge, _batches(items, lines_by_id))
     grounded, neutral, flagged = _llm_issues(items, results, failures, lines_by_id)
+    # 규칙으로 잡힌 근거성 위반도 재작성 대상에 넣는다(원문 인용으로 바꾸면 번호 · 근거 연결이 다시 맞춰진다)
+    already = {f["line_id"] for f in flagged}
+    for issue in issues["groundedness"]:
+        line_id = issue.get("line_id")
+        if line_id and line_id not in already and lines_by_id.get(line_id, {}).get("kind") == "fact":
+            already.add(line_id)
+            flagged.append({"line_id": line_id, "check": "groundedness", "reason": issue["reason"],
+                            "suggestion": "근거 원문 인용으로 바꾼다"})
     issues["groundedness"] += grounded
     issues["neutrality"] += neutral
 

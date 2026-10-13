@@ -70,6 +70,7 @@ def format_reference(entry: dict) -> str:
     source = str(entry["source"])
     site = domain_of(source)
     published = entry.get("published") or "n.d."
+    accessed = f" 열람 {entry['accessed']}." if not entry.get("published") and entry.get("accessed") else ""
     title = " ".join(str(entry.get("title") or "").split()).rstrip(".")
     parts = [f"[{entry['number']}] {site}({published})."]
     if title:
@@ -80,4 +81,4 @@ def format_reference(entry: dict) -> str:
         location = f"{location}, {page}" if location else page
     if location:
         parts.append(location)
-    return " ".join(parts)
+    return " ".join(parts) + accessed

@@ -66,7 +66,7 @@ class State(TypedDict, total=False):
     current_idx: int                             # 마지막으로 선택한 후보 번호, 최초 -1
     area_status: dict                            # 현재 기업 영역별 pending | done | failed
     rework_count: dict                           # 현재 기업 영역별 재작업 횟수
-    read_urls: list[str]                         # 현재 기업에서 이미 읽은 URL (재작업 때 제외)
+    read_urls: dict                              # 현재 기업에서 영역별로 이미 읽은 URL (같은 영역 재작업 때 제외)
     step_count: Annotated[int, operator.add]     # supervisor가 워커를 부른 횟수
     max_steps: int
     report_revisions: int                        # 보고서 재작성 횟수
@@ -77,3 +77,52 @@ class State(TypedDict, total=False):
 # 조사 워커는 자기가 바꾼 필드만 반환한다.
 #   tech -> {"pipeline", "evidence", "read_urls", "area_status"}
 #   company / regulation / market -> {"evidence", "read_urls", "area_status"}
+
+
+# ── 워커별 입력 범위 (graph.py에서 add_node(input_schema=...)로 적용) ─────────────
+# supervisor만 State 전체를 본다. 워커는 자기 일에 필요한 키만 받아, 다른 워커의 결과는 supervisor의 지시(task)로만 전달된다.
+
+class TechInput(TypedDict, total=False):
+    company: dict
+    task: Task
+    pipeline: list[PipelineItem]       # 자기 결과(물질 목록)에 이어 붙일 때만 읽는다
+    evidence: list[Evidence]           # 근거 ID 연속 번호 · 같은 인용 확인용
+    read_urls: dict
+    area_status: dict
+
+
+class ResearchInput(TypedDict, total=False):
+    """기업 · 규제 · 시장 워커. 기술 워커의 물질 목록은 task.pipeline으로만 받는다."""
+    company: dict
+    task: Task
+    evidence: list[Evidence]
+    read_urls: dict
+    area_status: dict
+
+
+class SelectInput(TypedDict, total=False):
+    candidates: list[dict]
+    current_idx: int
+
+
+class JudgeInput(TypedDict, total=False):
+    company: dict
+    evidence: list[Evidence]
+
+
+class ReportInput(TypedDict, total=False):
+    trace_id: str
+    candidates: list[dict]
+    evaluations: list[dict]
+    scores_by_company: dict
+    evidence: list[Evidence]
+    report_sections: dict
+    quality: Optional[dict]
+
+
+class QualityInput(TypedDict, total=False):
+    report_sections: dict
+    report_pages: int
+    evidence: list[Evidence]
+    evaluations: list[dict]
+    scores_by_company: dict

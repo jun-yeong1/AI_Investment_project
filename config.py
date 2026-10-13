@@ -49,3 +49,12 @@ MAX_REWORK_PER_COMPANY = 2     # 기업당 재작업 예산 = 관문 2개(기술
 MAX_STEPS = 60                 # 워커 호출 수 상한. 기업당 최대 8단계(선택 1 + 조사 4 + 재작업 2 + 판정 1) x 4 + 보고서 · 품질 루프 6
 MAX_REPORT_REVISIONS = 2       # 품질 평가 미달 시 보고서 재작성 상한
 MAX_REPORT_PAGES = 10
+
+# 재작업 때 먼저 찾는 독립 출처(공식 · 학술). "확인됨"은 기업 발표가 아닌 출처가 확인했다는 뜻이라 출처 유형을 지정해 찾는다
+SOURCE_DOMAINS = {
+    "tech": ["pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov", "nature.com", "biorxiv.org",
+             "sciencedirect.com", "pubs.acs.org", "clinicaltrials.gov"],
+    "regulation": ["clinicaltrials.gov", "fda.gov", "mfds.go.kr", "nedrug.mfds.go.kr", "kipris.or.kr"],
+    "company": ["dart.fss.or.kr", "thevc.kr", "innoforest.co.kr"],
+    "market": ["dart.fss.or.kr", "kind.krx.co.kr", "fiercebiotech.com", "biospace.com"],
+}

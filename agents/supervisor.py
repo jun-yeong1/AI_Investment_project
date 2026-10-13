@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 from datetime import datetime
 from functools import lru_cache
@@ -29,6 +30,8 @@ PROMPT = (ROOT / "prompts" / "supervisor.md").read_text(encoding="utf-8")
 CONFIRMED = "확인됨"
 FINISH = "FINISH"
 AREA_NAMES = {"company": "기업", "tech": "기술·파이프라인", "regulation": "규제", "market": "시장·사업화"}
+RISK_WORDS = re.compile(r"중단|반려|지연|소송|분쟁|해지|철회|실패|보류|hold|suspend|terminat|fail|lawsuit|withdraw|reject",
+                        re.IGNORECASE)
 
 
 class Decision(BaseModel):
@@ -198,7 +201,11 @@ def supervisor_node(state: State, *, choose: Callable[..., Decision] | None = No
     if mode == "rework":
         targets = [code for code in decision.target_items if code in ITEMS and ITEMS[code][1] == nxt]
         task["target_items"] = targets or [g["item"] for g in suff["gaps"] if g["area"] == nxt and g["item"]]
-        task["queries"] = [q for q in decision.queries if q.strip()][:3] or _fallback_queries(state, nxt, suff)
+        queries = [q for q in decision.queries if q.strip()][:3] or _fallback_queries(state, nxt, suff)
+        if not any(RISK_WORDS.search(q) for q in queries):
+            # 확증 편향을 막으려고 위험 방향 검색어 하나는 코드가 보장한다(LLM이 빠뜨려도)
+            queries = [*queries[:2], _fallback_queries(state, nxt, suff)[-1]]
+        task["queries"] = queries
         rework = dict(state.get("rework_count", {}))
         rework[nxt] = rework.get(nxt, 0) + 1
         update["rework_count"] = rework

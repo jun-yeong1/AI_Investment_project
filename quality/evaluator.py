@@ -138,6 +138,29 @@ def _used_numbers(sections: dict, pairs: list[tuple[str, dict]]) -> set[int]:
     return {n for text in texts for n in _markers(text)}
 
 
+NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+STATUS_TAIL = re.compile(r"\((?:확인됨|기업 주장만|상충함|찾지 못함)(?:,[^)]*)?\)")
+
+
+def _unsupported_numbers(line: dict, ids: list[str], evidence_by_id: dict[str, dict]) -> list[str]:
+    """사실 문장의 수치(금액 · 날짜 · 비율 · 물질 번호)는 인용 원문에 그대로 있어야 한다.
+    인용은 300자까지만 저장하므로 잘린 뒤쪽에만 있던 수치는 근거로 치지 않는다."""
+    text = _text(line)
+    if QUOTED in text:
+        return []
+    head, sep, rest = text.partition(": ")
+    body = rest if sep and " · " in head else text   # "기업 · 항목:" 이름표는 빼고 본문만
+    body = STATUS_TAIL.sub("", CITATION.sub("", body))
+    quotes = " ".join(str((evidence_by_id.get(i) or {}).get("quote", "")) for i in ids)
+    quotes = re.sub(r"(?<=\d),(?=\d)", "", quotes)
+    missing: list[str] = []
+    for number in NUMBER.findall(body):
+        plain = re.sub(r"(?<=\d),(?=\d)", "", number)
+        if plain not in quotes and plain not in missing:
+            missing.append(plain)
+    return missing
+
+
 def _groundedness_rules(sections: dict, pairs: list[tuple[str, dict]],
                         evidence_by_id: dict[str, dict]) -> list[Issue]:
     numbers = {ref["number"] for ref in sections.get("references") or []}
@@ -158,6 +181,9 @@ def _groundedness_rules(sections: dict, pairs: list[tuple[str, dict]],
         if marked != cited:
             problems.append(f"본문 인용 {sorted(marked)}와 citations {sorted(cited)}가 다름")
         problems += [f"참고문헌에 없는 번호 [{n}]" for n in sorted(marked | cited) if n not in numbers]
+        missing = _unsupported_numbers(line, ids, evidence_by_id)
+        if missing:
+            problems.append(f"인용 원문에 없는 수치: {', '.join(missing)}")
         # 번호가 달려 있어도 그 참고문헌이 이 문장의 근거를 가리켜야 근거성이 성립한다
         for n in sorted(cited & set(refs)):
             ref_ids = set(refs[n].get("evidence_ids") or [])

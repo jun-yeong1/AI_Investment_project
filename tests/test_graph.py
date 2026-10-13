@@ -199,3 +199,27 @@ def test_resume_from_checkpoint_after_crash():
     # 멈추기 전에 끝난 조사는 다시 하지 않는다(스탠다임 4영역은 한 번씩만)
     assert sum(1 for c, *_ in research if c == "standigm") == 4
     assert research[:len(done_before)] == done_before
+
+
+def test_rebuild_report_reruns_only_report_stage():
+    """끝난 실행에서 보고서 · 품질 단계만 다시 돈다(--rebuild-report). 조사 · 판정은 반복하지 않는다."""
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    from app import reset_report_stage
+
+    log = []
+    nodes = make_nodes({c["company_id"]: {a: OK for a in config.AREAS} for c in config.CANDIDATES}, log)
+    config_ = {"configurable": {"thread_id": "rebuild-test"}}
+    start = {"trace_id": "rebuild-test", "candidates": config.CANDIDATES, "current_idx": -1, "evidence": [],
+             "evaluations": [], "step_count": 0, "max_steps": config.MAX_STEPS, "report_revisions": 0}
+    with SqliteSaver.from_conn_string(":memory:") as saver:
+        graph = build_graph(nodes, checkpointer=saver)
+        first = graph.invoke(start, config_)
+        research = [entry for entry in log if len(entry) == 3]
+        reports = [entry for entry in log if entry[0] == "report"]
+        reset_report_stage(graph, config_)
+        final = graph.invoke(None, config_)
+    assert first["status"] == "done" and final["status"] == "done"
+    assert [entry for entry in log if len(entry) == 3] == research          # 조사 반복 없음
+    assert len([entry for entry in log if entry[0] == "report"]) > len(reports)
+    assert final["evaluations"] == first["evaluations"]

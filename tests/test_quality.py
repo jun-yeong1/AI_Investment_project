@@ -29,8 +29,8 @@ def reference(number, source, evidence_ids=()):
 def make_evidence():
     return [
         ev("standigm-1", "standigm", "https://www.alpha.com/a"),
-        ev("standigm-2", "standigm", "https://beta.org/b"),
-        ev("diagen-1", "diagen", "https://gamma.com/c"),
+        {**ev("standigm-2", "standigm", "https://beta.org/b"), "quote": "standigm-2 원문 인용: 2024년 시리즈A 투자"},
+        {**ev("diagen-1", "diagen", "https://gamma.com/c"), "quote": "diagen-1 원문 인용: 2023년 설립"},
         ev("diagen-2", "diagen", "https://delta.net/d"),
     ]
 
@@ -592,3 +592,50 @@ def test_hype_words_are_caught_by_rule_even_if_judge_passes(claim):
     assert not result["checks"]["neutrality"]["passed"]
     assert [f["line_id"] for f in result["flagged_lines"]] == ["ch1-001"]
     assert result["flagged_lines"][0]["check"] == "neutrality"
+
+
+def test_numbers_missing_from_quote_are_groundedness_issues():
+    """인용은 300자까지만 저장된다. 문장의 수치가 인용에 없으면(잘린 뒤쪽에만 있던 수치) 근거성 미달이다."""
+    import quality.evaluator as qe
+
+    def fact(line_id, text, evidence_id, n):
+        return {"id": line_id, "kind": "fact", "company_id": "diagen", "text": text,
+                "evidence_ids": [evidence_id], "citations": [n]}
+
+    sections = {
+        "title": "t", "revision": 0,
+        "summary": [{"id": "sum-001", "kind": "note", "company_id": None, "text": "보류 1곳", "evidence_ids": [], "citations": []}],
+        "chapters": [{"key": "chapter1", "title": "1", "lines": [
+            fact("ch1-001", "디어젠 · 기술: fostamatinib가 IC50 <1 μM로 TAM을 억제했다. (확인됨) [1]", "diagen-technology-001", 1),
+            fact("ch1-002", "디어젠 · 자금 조달: 2022년 2월 시리즈B로 1,200억 원을 유치했다. (확인됨, 2022-02-24 자료) [2]",
+                 "diagen-funding-001", 2),
+        ]}, {"key": "chapter5", "title": "5", "lines": [
+            {"id": "ch5-001", "kind": "note", "company_id": "diagen", "text": "디어젠: 기업 주장만 0개",
+             "evidence_ids": [], "citations": []},
+        ]}],
+        "references": [
+            {"number": 1, "source": "https://pmc.example/a", "page": None, "published": None, "accessed": "2026-10-13",
+             "title": None, "evidence_ids": ["diagen-technology-001"]},
+            {"number": 2, "source": "https://news.example/b", "page": None, "published": "2022-02-24",
+             "accessed": "2026-10-13", "title": None, "evidence_ids": ["diagen-funding-001"]},
+        ],
+    }
+    evidence = [
+        {"id": "diagen-technology-001", "company_id": "diagen", "item": "technology", "fact": "f",
+         "quote": "fostamatinib was predicted to inhibit TAM family members effectively, and we furt",
+         "status": "확인됨", "source": "https://pmc.example/a", "page": None, "published": None, "accessed": "2026-10-13"},
+        {"id": "diagen-funding-001", "company_id": "diagen", "item": "funding", "fact": "f",
+         "quote": "디어젠은 2022년 2월 시리즈B 투자로 1200억원을 유치했다",
+         "status": "확인됨", "source": "https://news.example/b", "page": None, "published": "2022-02-24",
+         "accessed": "2026-10-13"},
+    ]
+
+    def lenient_judge(items):
+        return {"judgments": [{"line_id": i["line_id"], "supported": True if i["kind"] == "fact" else None,
+                               "neutral": True, "reason": "r", "suggestion": ""} for i in items]}
+
+    result = qe.evaluate(sections, evidence, [{"company_id": "diagen", "name": "디어젠"}], 2, judge=lenient_judge)
+    assert not result["checks"]["groundedness"]["passed"]
+    flagged = [f for f in result["flagged_lines"] if f["check"] == "groundedness"]
+    assert [f["line_id"] for f in flagged] == ["ch1-001"]          # 상태 표기의 날짜 · 쉼표 금액은 지적하지 않는다
+    assert "50" in flagged[0]["reason"]

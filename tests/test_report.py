@@ -813,7 +813,8 @@ def test_default_rewrite_llm_path(state, sections, monkeypatch):
     assert line_of(revised, "ch3-001")["text"].startswith("스탠다임은 플랫폼을 활용한다고 밝혔다. (확인됨, 2026-09-01 자료) [")
     prompt = stub.prompts[0]
     assert "[ch3-001] 기업: 스탠다임" in prompt and "지적 사유: 과장" in prompt and "수정 제안: 고쳐라" in prompt
-    assert "{lines}" not in prompt and "근거 원문: technology 원문 인용 1" in prompt
+    quote = {e["id"]: e for e in state["evidence"]}[line_of(sections, "ch3-001")["evidence_ids"][0]]["quote"]
+    assert "{lines}" not in prompt and f"근거 원문: {quote}" in prompt
     assert stub.schemas == [RewriteOutput]
 
 
@@ -842,7 +843,10 @@ def test_report_and_quality_loop_converges(state, tmp_path, monkeypatch):
     assert {(f["line_id"], f["check"]) for f in quality["flagged_lines"]} == {
         ("ch1-003", "groundedness"), ("ch4-sum-galux-1", "neutrality")}
 
-    second = report_node({**state, **first, "quality": quality}, rewrite=neutral_rewrite)
+    # 재작성 문장에 수치가 없어야 수치 규칙과 무관하게 수렴을 볼 수 있다(neutral_rewrite는 줄 ID 숫자를 문장에 넣는다)
+    second = report_node({**state, **first, "quality": quality},
+                         rewrite=lambda requests: [{"line_id": r["line_id"], "text": "중립으로 고쳤다고 밝혔다"}
+                                                   for r in requests])
     assert second["report_revisions"] == 1
     assert run_quality(second)["passed"]
 
@@ -874,3 +878,30 @@ def test_required_report_contents_idea_and_market_size(state):
     for company in state["candidates"]:
         assert "사업 아이디어" in ch1[f"ch1-idea-{company['company_id']}"]["text"]
         assert "시장 규모" in ch2[f"ch2-size-{company['company_id']}"]["text"]
+
+
+def test_management_prefers_people_and_business_idea_prefers_platform():
+    cid = "standigm"
+    evidence = [
+        make_evidence(cid, "management", 1, fact="스탠다임은 AI 플랫폼으로 후보물질을 찾는다고 밝혔다."),
+        make_evidence(cid, "management", 2, fact="김진한 대표가 회사를 이끌고 있다."),
+        make_evidence(cid, "technology", 1, fact="스탠다임은 후보물질을 다수 보유했다."),
+        make_evidence(cid, "technology", 2, fact="스탠다임은 타깃 발굴 AI 플랫폼을 개발했다."),
+    ]
+    lines = all_lines(build_sections(one_company_state(evidence), no_summary))
+    management = next(line for line in lines if "· 경영진:" in line["text"])
+    idea = next(line for line in lines if line["id"] == f"ch1-idea-{cid}")
+    assert management["evidence_ids"] == [f"{cid}-management-002"]
+    assert idea["evidence_ids"] == [f"{cid}-technology-002"]
+
+
+def test_market_size_line_needs_a_number():
+    cid = "standigm"
+    evidence = [
+        make_evidence(cid, "technology", 1, fact="스탠다임은 타깃 발굴 AI 플랫폼을 개발했다."),   # 사업 아이디어 칸이 쓴다
+        make_evidence(cid, "sales", 1, fact="AI 신약개발 시장은 확장과 세분화가 예상된다."),
+        make_evidence(cid, "competition", 1, fact="글로벌 AI 신약개발 시장 규모는 2030년 50억 달러로 추정된다."),
+    ]
+    lines = all_lines(build_sections(one_company_state(evidence), no_summary))
+    size = next(line for line in lines if line["id"] == f"ch2-size-{cid}")
+    assert size["evidence_ids"] == [f"{cid}-competition-001"]

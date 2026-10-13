@@ -3,6 +3,7 @@
 실행: python app.py
 빠른 실연: python app.py --pages-per-node 1 --urls-per-query 1
 중단된 실행 이어서: python app.py --resume <trace_id>
+끝난 실행의 보고서만 다시: python app.py --rebuild-report <trace_id>
 """
 
 from __future__ import annotations
@@ -71,7 +72,16 @@ def _progress(update: dict[str, Any]) -> None:
             print(f"  품질 평가: {'통과' if quality['passed'] else '미달'} — {quality.get('summary', '')}", flush=True)
 
 
-def run(trace_id: str, *, resume: bool) -> dict[str, Any]:
+# 보고서 단계만 다시 돌릴 때 비우는 키. 조사 · 판정 결과(evidence · evaluations)는 그대로 둔다
+REPORT_RESET = {"report_sections": None, "quality": None, "report_revisions": 0, "status": "running"}
+
+
+def reset_report_stage(graph, config: dict[str, Any]) -> None:
+    """체크포인트를 판정 직후 상태로 되돌린다. 이어 실행하면 supervisor가 보고서 → 품질 평가부터 다시 고른다."""
+    graph.update_state(config, REPORT_RESET, as_node="judge")
+
+
+def run(trace_id: str, *, resume: bool, rebuild_report: bool = False) -> dict[str, Any]:
     from langgraph.checkpoint.sqlite import SqliteSaver
 
     config = {
@@ -87,6 +97,8 @@ def run(trace_id: str, *, resume: bool) -> dict[str, Any]:
     CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
     with SqliteSaver.from_conn_string(str(CHECKPOINT_DB)) as checkpointer:
         graph = build_graph(checkpointer=checkpointer)
+        if rebuild_report:
+            reset_report_stage(graph, config)
         try:
             # resume이면 입력 없이 마지막 체크포인트에서 이어 간다
             for update in graph.stream(None if resume else initial_state(trace_id), config,
@@ -119,7 +131,10 @@ def run(trace_id: str, *, resume: bool) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AI 신약개발 스타트업 투자 보고서 생성 (Supervisor)")
-    parser.add_argument("--resume", metavar="TRACE_ID", help="중단된 실행을 마지막 체크포인트부터 이어서 실행")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--resume", metavar="TRACE_ID", help="중단된 실행을 마지막 체크포인트부터 이어서 실행")
+    mode.add_argument("--rebuild-report", metavar="TRACE_ID",
+                      help="끝난 실행의 보고서 · 품질 평가 단계만 다시 실행(조사 · 판정 결과는 그대로)")
     parser.add_argument("--pages-per-node", type=_positive_int,
                         help="조사 워커 1회당 원문 페이지 수 제한 (기본값은 Agent 설정)")
     parser.add_argument("--urls-per-query", type=_positive_int,
@@ -137,9 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.urls_per_query is not None:
         os.environ["AGENT_URLS_PER_QUERY"] = str(args.urls_per_query)
 
-    trace_id = args.resume or datetime.now().strftime("%m%d-%H%M-") + uuid.uuid4().hex[:4]
+    trace_id = args.resume or args.rebuild_report or datetime.now().strftime("%m%d-%H%M-") + uuid.uuid4().hex[:4]
     print(f"trace_id: {trace_id}")
-    record = run(trace_id, resume=bool(args.resume))
+    record = run(trace_id, resume=bool(args.resume or args.rebuild_report), rebuild_report=bool(args.rebuild_report))
     print(f"상태: {record['status']} · 워커 호출 {record['steps']}회 · 보고서 재작성 {record['report_revisions']}회")
     print(f"보고서: {record['report']} ({record['report_pages']}쪽)")
     print(f"실행 로그: {LOG_DIR / (trace_id + '.json')} · 결정 로그: {LOG_DIR / (trace_id + '.jsonl')}")

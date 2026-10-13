@@ -1,27 +1,29 @@
+# 검증 환경: Python 3.11. 테스트와 제출 실행(docs/run-*)에 쓴 버전으로 고정했다
 # LangGraph · LLM
-langgraph
-langgraph-checkpoint-sqlite
-langchain
-langchain-core
-langchain-openai
-langchain-tavily
-python-dotenv
-pydantic
+langgraph==1.0.9
+langgraph-checkpoint-sqlite==3.0.3
+langgraph-checkpoint==3.0.1   # langgraph 1.0.9와 맞는 버전(더 높은 버전은 실행 중 TypeError)
+langchain==1.0.2
+langchain-core==1.0.1
+langchain-openai==1.0.1
+langchain-tavily==0.2.12
+python-dotenv==1.2.1
+pydantic==2.12.3
 
 # Web
-beautifulsoup4
-pypdf
-tavily-python
+beautifulsoup4==4.14.2
+pypdf==6.9.2
+tavily-python==0.7.12
 
 # RAG
-langchain-community
-langchain-classic
-langchain-text-splitters
-pymupdf
-sentence-transformers
-faiss-cpu
-kiwipiepy
-rank-bm25
+langchain-community==0.4.1
+langchain-classic==1.0.0
+langchain-text-splitters==1.0.0
+pymupdf==1.28.2
+sentence-transformers==5.3.0
+faiss-cpu==1.13.2
+kiwipiepy==0.21.0
+rank-bm25==0.2.2
 
 # 테스트
-pytest
+pytest==9.1.1

@@ -213,6 +213,10 @@ def _is_blog(source: str) -> bool:
     return any(host in domain_of(source) for host in BLOG_HOSTS)
 
 
+# 경영진 칸은 사람(대표 · 창업자 · 임원)을 말하는 근거를 먼저 고른다. 플랫폼 소개가 경영진 칸에 오는 것을 막는다
+TOPIC = {"management": re.compile(r"대표|CEO|CTO|CSO|CFO|COO|창업자|공동창업|사장|이사|임원|박사|책임자")}
+
+
 def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains: set[str],
           used_facts: set[str]) -> dict | None:
     """judge가 쓴 근거, 확인됨 순으로 고르고 순위가 같으면 이 기업이 아직 안 쓴 도메인을 고른다.
@@ -221,7 +225,9 @@ def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains
     if not pool:
         return None
     order = {evidence_id: n for n, evidence_id in enumerate(judged_ids)}
+    topic = TOPIC.get(code)
     return min(pool, key=lambda e: (
+        bool(topic) and not topic.search(e.get("fact", "")),
         e["id"] not in order,
         STATUS_RANK.get(e["status"], 3),
         _is_blog(e["source"]),
@@ -236,6 +242,7 @@ def _fact_key(evidence: dict) -> str:
 
 MARKET_SIZE = re.compile(r"시장\s*규모|시장은|환자\s*수|억\s*달러|조\s*원\s*규모|market size|patients", re.IGNORECASE)
 IDEA_ITEMS = ("technology", "competition", "stage")
+PLATFORM = re.compile(r"플랫폼|platform", re.IGNORECASE)   # 사업 아이디어 = 무엇으로 신약을 찾는가(플랫폼 설명 우선)
 ABSENT = re.compile(r"없다|없음|없으며|확인되지 않")
 
 
@@ -272,15 +279,16 @@ def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[d
             pool = evidence_by_company[company_id]
             if key == "chapter1":
                 ideas = [e for e in pool if e.get("item") in IDEA_ITEMS and _fact_key(e) not in facts[company_id]]
-                idea = min(ideas, key=lambda e: (STATUS_RANK.get(e["status"], 3), _is_blog(e["source"])), default=None)
+                idea = min(ideas, key=lambda e: (not PLATFORM.search(e.get("fact", "")), IDEA_ITEMS.index(e["item"]),
+                                                 STATUS_RANK.get(e["status"], 3), _is_blog(e["source"])), default=None)
                 if idea:
                     facts[company_id].add(_fact_key(idea))
                 _extra_line(lines, f"ch1-idea-{company_id}", "사업 아이디어", company, idea, citations,
                             "핵심 기술 · 플랫폼을 설명하는 원문 근거를 찾지 못함.")
             if key == "chapter2":
-                # "시장 규모 정보가 없다"처럼 부재를 말하는 문장은 시장 규모 근거가 아니다
-                size = next((e for e in pool if MARKET_SIZE.search(e.get("fact", "")) and not ABSENT.search(e.get("fact", ""))
-                             and _fact_key(e) not in facts[company_id]), None)
+                # "시장 규모 정보가 없다"처럼 부재를 말하거나 수치가 없는 문장은 시장 규모 근거가 아니다
+                size = next((e for e in pool if MARKET_SIZE.search(e.get("fact", "")) and re.search(r"\d", e.get("fact", ""))
+                             and not ABSENT.search(e.get("fact", "")) and _fact_key(e) not in facts[company_id]), None)
                 if size:
                     facts[company_id].add(_fact_key(size))
                 _extra_line(lines, f"ch2-size-{company_id}", "시장 규모", company, size, citations,

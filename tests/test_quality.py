@@ -556,3 +556,36 @@ def test_prompt_defines_both_judgments():
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     for word in ("line_id", "supported", "neutral", "투자 권유", "기업 간 우열", "전망", "과장 수식어", "기업 주장"):
         assert word in prompt
+
+
+
+def test_hype_words_are_caught_by_rule_even_if_judge_passes():
+    """LLM Judge가 통과시켜도 과장 수식어는 규칙이 잡아 재작성 대상으로 넘긴다."""
+    import quality.evaluator as qe
+
+    sections = {
+        "title": "t", "revision": 0,
+        "summary": [{"id": "sum-001", "kind": "note", "company_id": None, "text": "보류 1곳", "evidence_ids": [], "citations": []}],
+        "chapters": [{"key": "chapter1", "title": "1", "lines": [
+            {"id": "ch1-001", "kind": "fact", "company_id": "galux",
+             "text": "갤럭스 · 기술: 글로벌 최고 수준의 기술력을 확보했다. (기업 주장만) [1]",
+             "evidence_ids": ["galux-technology-001"], "citations": [1]},
+        ]}, {"key": "chapter5", "title": "5", "lines": [
+            {"id": "ch5-001", "kind": "note", "company_id": "galux", "text": "갤럭스: 단일 출처 의존, 기업 주장만 1개",
+             "evidence_ids": [], "citations": []},
+        ]}],
+        "references": [{"number": 1, "source": "https://news.example/a", "page": None, "published": None,
+                        "accessed": "2026-10-13", "title": None, "evidence_ids": ["galux-technology-001"]}],
+    }
+    evidence = [{"id": "galux-technology-001", "company_id": "galux", "item": "technology", "fact": "f",
+                 "quote": "글로벌 최고 수준의 기술력", "status": "기업 주장만", "source": "https://news.example/a",
+                 "page": None, "published": None, "accessed": "2026-10-13"}]
+
+    def lenient_judge(items):
+        return {"judgments": [{"line_id": i["line_id"], "supported": True if i["kind"] == "fact" else None,
+                               "neutral": True, "reason": "r", "suggestion": ""} for i in items]}
+
+    result = qe.evaluate(sections, evidence, [{"company_id": "galux", "name": "갤럭스"}], 2, judge=lenient_judge)
+    assert not result["checks"]["neutrality"]["passed"]
+    assert [f["line_id"] for f in result["flagged_lines"]] == ["ch1-001"]
+    assert result["flagged_lines"][0]["check"] == "neutrality"

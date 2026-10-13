@@ -212,6 +212,21 @@ def _bias_rules(pairs: list[tuple[str, dict]], evidence_by_id: dict[str, dict],
     return issues
 
 
+# 근거 원문에 있어도 보고서 문장에는 쓰지 않는 정도 표현. LLM Judge가 "(기업 주장만)" 표기만 보고 통과시키는 경우를 규칙으로 막는다
+HYPE = re.compile(r"최고|최초|최상|획기적|압도적|독보적|혁신적|세계적|선도적|유일한|극대화|수백 배|폭발적|탁월한|퀀텀 점프")
+
+
+def _neutrality_rules(pairs: list[tuple[str, dict]]) -> list[Issue]:
+    issues = []
+    for _, line in pairs:
+        if line.get("kind") != "fact":
+            continue
+        found = sorted(set(HYPE.findall(_text(line))))
+        if found:
+            issues.append(_issue("neutrality", f"과장 수식어 {', '.join(found)} 사용", line=line))
+    return issues
+
+
 def _format_rules(sections: dict, report_pages: int) -> list[Issue]:
     issues = []
     if report_pages > MAX_REPORT_PAGES:
@@ -367,12 +382,19 @@ def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], repo
     issues["groundedness"] += _groundedness_rules(sections, pairs, evidence_by_id)
     issues["bias"] += _bias_rules(pairs, evidence_by_id, names, evaluations_by_id, scores_by_company or {})
     issues["format"] += _format_rules(sections, report_pages)
+    issues["neutrality"] += _neutrality_rules(pairs)
 
     items = _judge_items(pairs, evidence_by_id, names)
     results, failures = _run_judge(judge or llm_judge, _batches(items, lines_by_id))
     grounded, neutral, flagged = _llm_issues(items, results, failures, lines_by_id)
     # 규칙으로 잡힌 근거성 위반도 재작성 대상에 넣는다(원문 인용으로 바꾸면 번호 · 근거 연결이 다시 맞춰진다)
     already = {f["line_id"] for f in flagged}
+    for issue in issues["neutrality"]:
+        line_id = issue.get("line_id")
+        if line_id and line_id not in already and lines_by_id.get(line_id, {}).get("kind") == "fact":
+            already.add(line_id)
+            flagged.append({"line_id": line_id, "check": "neutrality", "reason": issue["reason"],
+                            "suggestion": "정도 표현을 빼고 확인할 수 있는 사실만 남긴다"})
     for issue in issues["groundedness"]:
         line_id = issue.get("line_id")
         if line_id and line_id not in already and lines_by_id.get(line_id, {}).get("kind") == "fact":

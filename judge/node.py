@@ -1,4 +1,5 @@
 """투자 판단 노드: 현재 기업 근거 -> LLM 예/아니오 답 -> scorer -> State."""
+from datetime import datetime
 from pathlib import Path
 
 from langchain.chat_models import init_chat_model
@@ -43,6 +44,7 @@ def summarize(company: dict, answers: list[dict], evidence: list[dict]) -> dict:
     result = decide(scores)
     return {
         "scores": scores,
+        "scores_by_company": {company["company_id"]: scores},
         "total": total_score(scores),
         "verdict": result["verdict"],
         "evaluations": [{
@@ -58,8 +60,16 @@ def summarize(company: dict, answers: list[dict], evidence: list[dict]) -> dict:
 def judge_node(state: dict) -> dict:
     company = state["company"]
     evidence = [e for e in state.get("evidence", []) if e.get("company_id") == company["company_id"]]
-    llm = init_chat_model(JUDGE_MODEL, model_provider=JUDGE_PROVIDER, temperature=0)
-    out: JudgeOutput = llm.with_structured_output(JudgeOutput).invoke(
-        build_prompt(company, evidence)
-    )
-    return summarize(company, [a.model_dump() for a in out.answers], evidence)
+    if not evidence:
+        # 근거가 없으면 LLM에 물을 것이 없다. summarize가 12항목을 찾지 못함(0점)으로 채운다
+        return summarize(company, [], evidence)
+    try:
+        llm = init_chat_model(JUDGE_MODEL, model_provider=JUDGE_PROVIDER, temperature=0)
+        out: JudgeOutput = llm.with_structured_output(JudgeOutput).invoke(build_prompt(company, evidence))
+        answers = [a.model_dump() for a in out.answers]
+    except Exception as exc:
+        # 판정 LLM이 실패해도 그래프를 멈추지 않는다. 답 없는 항목은 찾지 못함으로 남고 에러를 기록한다
+        error = {"node": "judge", "type": type(exc).__name__, "message": str(exc)[:300],
+                 "ts": datetime.now().astimezone().isoformat(timespec="seconds")}
+        return {**summarize(company, [], evidence), "errors": [error], "last_error": error}
+    return summarize(company, answers, evidence)

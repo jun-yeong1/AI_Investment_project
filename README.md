@@ -1,325 +1,182 @@
-# AI Startup Investment Evaluation Agent
+# AI Startup Investment Evaluation Agent — Multi-Agent Orchestration
 6조 : 김윤성, 정문기, 이승호, 이세영, 이준영
 
-본 프로젝트는 **AI 신약개발(Healthcare AI) 스타트업**의 공개 근거를 수집하고, 기술·규제·시장·사업 위험을 기준으로 투자 적격성을 평가하는 에이전트를 설계하고 구현한 팀 프로젝트입니다.
-
-현재 저장소에는 PDF 기반 Agentic RAG와 12개 위험요인 기반 투자 판단(Judge) 모듈이 포함되어 있습니다. 아래 전체 에이전트 구성과 그래프 흐름은 팀 설계서를 기준으로 작성했으며, 조사·보고서 모듈의 실제 파일 구성은 통합 후 갱신할 예정입니다.
+AI 신약개발(Healthcare AI) 스타트업 4곳의 공개 근거를 모아 투자 위험을 평가하는 에이전트를 **Supervisor 패턴**으로 다시 설계했다. RAG 과제 버전(main 브랜치)의 조사 · 판정 모듈을 재사용하고, 흐름 제어 · State · 보고서 · 품질 평가를 바꿨다.
 
 ## Overview
 
-- **Objective**: AI 신약개발 스타트업의 경영진, 사업 단계, 기술, 규제, 제조, 시장성, 경쟁력, 자금 조달, 해외 진출, 평판, 소송 및 투자금 회수 가능성을 바탕으로 투자 적격성을 분석합니다.
-- **Method**: LangGraph, Agentic RAG, 구조화 출력, 코드 기반 점수 계산 및 Stage-Gate 방식의 판정 규칙을 사용합니다.
-- **Evaluation**: Risk Factor Summation Method(RFSM)의 12개 위험요인과 5단계 척도를 차용한 위험평가표를 사용합니다. 기업가치 산정이 아니라 투자 위험 판단을 목적으로 합니다.
-- **Verdict**: 기업을 `적격`, `보류`, `부적격`으로 분류하고, 보류 기업에는 재검토 조건을 제시합니다.
+- **Objective** : 후보 4곳을 기업 · 기술 · 규제 · 시장 관점의 웹 원문 근거로 평가해 12개 위험요인 점수와 판정(적격 · 보류 · 부적격)을 내고, 통합 보고서 1부(최대 10쪽)를 만든다.
+- **Pattern** : **Supervisor** — RAG 버전은 4곳 × 12항목 = 48칸 중 45칸이 근거 부족(찾지 못함 26, 기업 주장만 19)으로 끝나 4곳 모두 보류였다. 영역마다 고정 검색어로 한 번만 조사하고 근거가 충분한지 확인하는 단계가 없었기 때문이다. 조사 결과를 보고 **부족한 영역만 다시 조사시키는 제어**가 필요해 Supervisor를 골랐다. Orchestrator-Workers는 조사 전에 계획을 세우는 구조라, 무엇이 부족할지는 조사해 봐야 아는 이 문제에는 맞지 않았다. 순차 실행이라 느려지는 대신 재작업 예산으로 비용을 묶었다.
+- **동적 처리** : RAG 버전은 `select → (company ∥ tech) → (regulation ∥ market) → judge` 순서가 엣지로 고정돼 있었다. 이번 버전은 엣지가 `supervisor ⇄ 워커`뿐이고, supervisor가 매 턴 State(영역별 조사 상태, 관문 · 영역별 "확인됨" 근거 수, 재작업 횟수)를 보고 다음 담당을 정한다. 그래서
+  - 기업마다 조사 순서, **재작업 대상 · 횟수**가 근거 상태에 따라 달라진다 (근거가 충분하면 바로 판정, 부족하면 관문이 걸린 영역부터 다시 조사)
+  - 재작업 때는 supervisor가 부족한 항목과 새 검색어를 지시한다
+  - 보고서가 품질 평가를 통과하지 못하면 지적된 문장만 고쳐 다시 평가한다
+
+## Goal · Success Criteria
+
+- **Desired Outcome** : 투자심의 담당자가 후보 4곳 각각에 대해 "어떤 근거로 적격 · 보류 · 부적격인지, 보류라면 무엇을 확인하면 다시 볼 수 있는지"를 보고서 1부로 바로 판단한다. 기업가치 산정 · 투자 실행 권고는 범위 밖이다.
+- **Success Criteria** (코드로 검사하는 것만 적었다)
+
+| 구분 | 기준 | 검사 위치 |
+|---|---|---|
+| 결과 품질 | 사실 문장의 인용 번호 · 근거 ID 연결 100%, 인용 원문으로 뒷받침되지 않는 문장 0건, 투자 권유 · 우열 · 과장 표현 0건 | `quality/evaluator.py` |
+| 결과 품질 | 관문 2항목 · 4영역 "확인됨" 근거 여부를 판정 전에 확인, 부족하면 재작업 | `agents/supervisor.py` |
+| 업무 제약 | 보고서 10쪽 이하, SUMMARY(개요 문장 없음) · REFERENCE 필수 | `quality/evaluator.py`, `report/pdf.py` |
+| 운영 | 기업당 재작업 2회 · 보고서 재작성 2회 · 워커 호출 60회 상한, 무한 루프 없이 종료 | `agents/supervisor.py`, `tests/test_graph.py` |
+| 운영 | 조사 워커 · 판정 LLM이 실패해도 그래프가 멈추지 않고 에러를 남김 | `agents/common.py run_area`, `judge/node.py` |
 
 ## Features
 
-### RAG
+- **근거 수집** : 웹 검색 → 원문 페이지 → LLM 추출 → 인용문이 원문에 실제로 있는지 코드로 검증. 목표 기업명(국문 · 영문)이 없는 원문은 조사 예산에서 뺀다(다른 회사 기사가 섞이는 것을 실측으로 확인해 추가). 임상 등록 · 논문은 영문 자료가 많아 기술 · 규제 조사와 재작업에 영문명 검색어를 쓴다. 규제 · 기술 · 시장 기준 문서는 Agentic RAG로 찾아 추출 문맥으로만 쓴다.
+- **근거 충분성 루프** : 관문 2항목(기술, 법률·정책)과 4영역마다 독립 출처로 "확인됨"인 근거가 있는지 코드가 계산한다. 부족하면 판정으로 넘어가지 않고 재작업한다(기업당 2회, 영역당 1회).
+- **확증 편향 방지 전략**
+  - 충분성 기준은 "긍정 근거"가 아니라 "독립 출처로 확인된 근거"다. 부정 사실도 확인되면 충분하다.
+  - 재작업 검색어 중 하나는 반드시 위험 방향(중단 · 반려 · 지연 · 소송 · 해지)으로 쓴다.
+  - 기업 발표만 있는 근거는 "기업 주장만"으로 구분하고, 보고서에서는 주체를 밝혀 쓴다. 기업 자체 사이트(도메인에 기업 영문명 · ID가 들어간 곳)의 내용은 LLM이 확인됨으로 분류해도 코드가 "기업 주장만"으로 바꾼다 — 실행 중 회사 홈페이지 기술 소개가 "확인됨"으로 잡혀 기술 관문을 통과시킬 뻔한 것을 보고 넣었다.
+  - 보고서는 기업마다 인용 출처를 서로 다른 사이트에서 고르고, 한 사이트에만 의존하면 한계점에 공개한다. 미확인 · 부정 항목은 한계점에서 빠지지 않는다.
+- **보고서 품질 평가** : 보고서를 만든 뒤 품질 평가 노드가 Groundedness · 중립성 · 편향 통제 · 형식을 평가하고, 미달이면 지적된 문장만 재작성해 다시 평가한다(최대 2회). 평가 방식은 규칙 + LLM Judge **Hybrid**이고, 통과 여부는 코드가 정한다.
 
-- 규제·기술·시장 분야의 공식 보고서 및 논문 6종, 총 134쪽을 검색 대상으로 사용합니다.
-- PyMuPDF로 PDF의 텍스트와 쪽 번호를 추출합니다.
-- 표·그래프·이미지 페이지는 비전 LLM으로 전사하고 원문 대조가 필요한 수치를 구분합니다.
-- 한국어와 영어 검색 질문을 생성하여 다국어 문서를 검색합니다.
-- FAISS 검색 결과를 LLM이 다시 관련성 평가합니다.
-- 관련 근거가 없으면 검색 질문을 한 번 재작성한 뒤 다시 검색합니다.
-- 청킹 5종, 임베딩 3종, 검색 방식 3종을 동일한 평가셋으로 비교해 검색 설정을 선택합니다.
-- 검색 근거와 함께 문서명, 페이지, 청크 ID 및 유사도 점수를 반환합니다.
-
-### Multi-Agent Workflow
-
-- 후보 4곳을 판정과 관계없이 모두 평가합니다.
-- 기업 조사와 기술·파이프라인 조사를 먼저 병렬로 실행합니다.
-- 기술·파이프라인 에이전트가 찾은 물질명·적응증·개발 단계 목록을 규제와 시장·사업화 에이전트에 전달합니다.
-- 규제와 시장 조사는 회사 이름이 아니라 물질·적응증 단위로 수행합니다.
-- 네 조사 영역이 끝난 뒤 투자 판단을 한 번 실행합니다.
-- 적격 기업마다 개별 보고서를 생성하되 다음 후보 평가를 계속합니다.
-- 적격 기업이 없으면 네 기업의 판정 사유와 재검토 조건을 비교한 보고서를 생성합니다.
-
-### Judge
-
-- RFSM의 12개 위험요인을 차용하여 기업 위험을 평가합니다.
-- 기술과 법률·정책 항목을 필수 관문으로 적용합니다.
-- LLM은 각 항목의 사실 여부와 근거 ID를 구조화된 형식으로 반환합니다.
-- 실제 점수 계산, 합산 및 최종 판정은 Python 코드가 수행합니다.
-- 근거를 `확인됨`, `기업 주장만`, `찾지 못함`, `상충함`으로 구분합니다.
-- 하나의 근거가 여러 평가 항목에 중복 반영되지 않도록 제한합니다.
-- 기준점 `+5`와 함께 `+4`, `+6`에 대한 민감도 분석을 제공합니다.
-- 비관문 영역을 포함해 조사 근거가 부족한 경우 보류 및 재검토 조건을 생성합니다.
+| 평가 항목 | 규칙(결정론) | LLM Judge (gpt-4.1) |
+|---|---|---|
+| Groundedness | 사실 문장마다 인용 번호 · 근거 ID 존재, [n] ↔ REFERENCE 대응, 안 쓰인 참고문헌 없음 | 문장이 인용한 원문으로 뒷받침되는가 |
+| 중립성 | — | 투자 권유 · 기업 간 우열 · 전망 · 과장 수식어, 기업 주장을 사실처럼 단정 |
+| 편향 통제 | 기업별 인용 출처가 한 곳뿐이면 한계점에 공개, 음수 · 관문 미충족 항목 누락 없음, 기업 주장만 인용 공개 | — |
+| 형식 | 10쪽 이하, SUMMARY · REFERENCE 존재, SUMMARY에 개요 문장 없음 | — |
 
 ## Tech Stack
 
-- **Language**: Python
-- **Framework**: LangGraph, LangChain
-- **LLM / Generator**: Gpt4.1-mini
-- **LLM / Relevance Grader**: Gpt4o-mini
-- **LLM / Vision Parser**: Gpt4.1-mini
-- **LLM / Judge**: Gpt4.1-mini
-- **PDF Parsing**: PyMuPDF
-- **Retrieval**: FAISS — Hit Rate@3 **0.824**, MRR **0.703**
-- **Embedding**: `BAAI/bge-m3`
-- **Korean Tokenizer**: Kiwi
-- **Structured Output**: Pydantic
-- **Test**: pytest
+- **Framework** : LangGraph 1.0 (StateGraph, add_conditional_edges, SQLite checkpointer), LangChain
+- **LLM/Supervisor** : gpt-4.1-mini (구조화 출력 — 다음 담당 · 사유 · 재작업 검색어)
+- **LLM/Generator** : gpt-4.1-mini (원문 추출, 보고서 판단 요지 · 중립 재작성)
+- **LLM/Judge** : gpt-4.1-mini (12항목 예/아니오 → 점수는 코드), gpt-4.1 (보고서 품질 평가 — 생성 모델과 분리)
+- **Retrieval** : FAISS — Hit Rate@3 **0.824**, MRR **0.703** (평가셋 34문항, 상세는 main 브랜치 README)
+- **Embedding** : `BAAI/bge-m3`
+- **Web** : Tavily 검색 + 원문 HTML/PDF 수집
+- **Tracing** : LangSmith (`metadata.trace_id`)
+- **Test** : pytest (LLM · 네트워크 없이 그래프 흐름 · 재작업 · 종료 · 품질 루프 검증)
 
 ## Agents
 
-### 1. Company Research Agent
+| 이름 | 노드 | 하는 일 |
+|---|---|---|
+| Supervisor | `supervisor` | 근거 충분성 계산 → 허용 행동 계산 → LLM이 다음 담당 · 사유 · 재작업 검색어 선택 → 허용 밖이면 코드가 교정. 결정마다 로그 |
+| 후보 선택 | `select` | 다음 기업 선택, 기업 단위 상태(영역 상태 · 재작업 횟수 · 읽은 URL) 초기화 |
+| 기업 조사 | `company` | 경영진 · 자금 조달 · 평판 |
+| 기술·파이프라인 | `tech` | 기술(관문) · 사업 단계 · 제조, 물질 · 적응증 · 단계 목록 |
+| 규제 | `regulation` | 법률·정책(관문) · 소송 · 해외 — supervisor가 넘겨준 물질 목록 단위로 조사 |
+| 시장·사업화 | `market` | 영업·마케팅 · 경쟁 · 투자금 회수 — 물질 · 적응증 단위 |
+| 투자 판단 | `judge` | LLM은 항목별 예/아니오와 근거 ID만, 점수 · 관문 · 판정은 코드 |
+| 보고서 작성 | `report` | 4곳 통합 보고서(SUMMARY · 1~5장 · REFERENCE, 10쪽 이하). 재작성 때는 지적 문장만 수정 |
+| 품질 평가 | `quality` | Hybrid 평가, 통과 여부는 코드 |
 
-기업과 팀 자체의 위험을 조사합니다.
+워커는 다른 워커를 부르거나 다음 담당을 정하지 않는다. 기술 워커가 찾은 물질 목록도 supervisor가 받아 규제 · 시장 워커의 지시(`task.pipeline`)에 실어 보낸다. 무엇을 · 언제 할지(WHAT · WHEN)는 supervisor가 정하고, 어떻게 찾을지(HOW: 검색 → 원문 → 추출 → 인용 검증)는 워커가 정해진 절차로 수행한다.
 
-- **평가 항목**: 경영진, 자금 조달, 평판
-- **주요 출처**: 기업 홈페이지, 인터뷰, 투자 기사, THE VC, 혁신의숲
-- 창업 전 전문성과 창업 후 핵심 인력 영입 여부를 구분해 확인합니다.
-- 최근 투자 유치와 자금난·구조조정 보도를 조사합니다.
-- 정부 과제, 공신력 있는 수상, 연구 부정 및 부정 보도를 확인합니다.
-- 검색 결과의 요약문이 아니라 원문 페이지를 열어 관련 문단, 발행일 및 접근일을 근거로 저장합니다.
+**액터** : 투자심의 담당자(실행 · 보고서 수신) / supervisor와 8개 워커 / 외부 서비스 — Tavily(검색), 원문 웹사이트, OpenAI(LLM), LangSmith(트레이스)
 
-### 2. Technology & Pipeline Agent
+### 어디까지가 LLM 판단인가
 
-AI 플랫폼의 기술 검증 수준과 신약 파이프라인을 조사합니다.
+| LLM이 정하는 것 | 코드가 정하는 것 |
+|---|---|
+| 허용된 행동 중 다음 담당, 그 사유 | 근거 충분성(관문 · 영역 확인됨 수), 허용 행동 목록, 데이터 의존(규제 · 시장은 기술 다음) |
+| 재작업 대상 항목과 새 검색어 | 재작업 · 재작성 · 단계 상한, 허용 밖 선택 교정 |
+| 원문에서 사실 · 인용 추출, 상태(확인됨/기업 주장만) 1차 분류 | 인용문이 원문에 있는지, 기업 자체 사이트면 기업 주장만으로 교정, 목표 기업명 없는 원문 제외 |
+| 12항목 예/아니오와 근거 ID | 점수 변환 · 합계 · 관문 · 판정 · 민감도 |
+| 보고서 기업별 판단 요지, 지적 문장 재작성 | 보고서 구조 · 대표 근거 선택 · 인용 번호 · 10쪽 상한 |
+| 문장별 근거성 · 중립성 판정 | 품질 통과 여부, 편향 · 형식 규칙 |
 
-- **평가 항목**: 기술, 사업 단계, 제조
-- **사용 도구**: 기술 문서 RAG, 웹 검색, 원문 확인
-- AI 발굴 물질의 전임상·임상 결과와 동료심사 논문을 확인합니다.
-- 파이프라인별 물질명, 적응증, 개발 단계를 구조화된 목록으로 만듭니다.
-- 임상용 물질의 GMP 생산 및 CDMO 계약 여부를 조사합니다.
-- 생성한 파이프라인 목록을 규제 및 시장·사업화 에이전트에 전달합니다.
+## State Schema
 
-### 3. Regulation Agent
+```python
+class State(TypedDict, total=False):
+    # 작업 페이로드
+    candidates, company, pipeline
+    evidence: Annotated[list[Evidence], merge_evidence]      # 같은 (기업, 출처, 인용)은 한 번만
+    scores, total, verdict                                    # 현재 기업 판정
+    evaluations: Annotated[list[dict], merge_by_company]      # 기업당 1건, 다시 판정하면 교체
+    scores_by_company: Annotated[dict, merge_dict]
+    report_sections, report_path, report_pages, quality
+    # 제어 메타
+    trace_id, next, task, current_idx
+    area_status, rework_count, read_urls
+    step_count: Annotated[int, operator.add]
+    max_steps, report_revisions, status
+    errors: Annotated[list[dict], operator.add]
+    last_error
+```
 
-파이프라인별 규제 진행 상황과 법률 위험을 조사합니다.
-
-- **평가 항목**: 법률·정책, 해외, 소송
-- **사용 도구**: 규제 문서 RAG, 웹 검색, 원문 확인
-- FDA IND 효력 발생, 식약처 임상시험계획 승인, Clinical Hold 및 반려 여부를 확인합니다.
-- FDA 희귀의약품·신속심사 지정 요건은 RAG에서 찾고, 실제 지정 여부는 물질별 웹 근거로 확인합니다.
-- 특허 등록, 특허 분쟁 및 소송 정보를 조사합니다.
-- 해외 기술이전, 해외 공동연구 및 해외 임상 진행 여부를 확인합니다.
-
-### 4. Market & Commercialization Agent
-
-파이프라인의 시장성과 사업화·회수 가능성을 조사합니다.
-
-- **평가 항목**: 영업·마케팅, 경쟁, 투자금 회수
-- **보조 정보**: 적응증별 시장 규모
-- **사용 도구**: 시장·사업성 문서 RAG, 웹 검색, 원문 확인
-- 기술이전 계약, 공동연구, 계약금 공개 및 계약 해지 여부를 조사합니다.
-- 적응증별 시장 규모와 경쟁 약물을 확인합니다.
-- 자체 데이터, 특허 및 실험 검증을 기준으로 플랫폼 차별성을 조사합니다.
-- 기술성평가, 상장 예비심사, 상장 철회 등 투자금 회수 경로를 확인합니다.
-
-### 5. Agentic RAG
-
-규제·기술·시장 문서에서 투자 판단에 필요한 기준, 제도 및 통계를 검색합니다.
-
-1. 사용자 질문과 파이프라인 정보를 바탕으로 한국어·영어 검색 질문을 생성합니다.
-2. `doc_type`에 따라 규제, 기술, 시장 문서를 분리하여 검색합니다.
-3. FAISS에서 관련 청크를 조회합니다.
-4. LLM이 검색 결과에 질문의 답이 직접 포함되어 있는지 평가합니다.
-5. 관련 근거가 없으면 검색 질문을 한 번 재작성합니다.
-6. 최종적으로 관련 청크와 문서명·페이지를 반환하며, 찾지 못한 경우 빈 목록을 반환합니다.
-
-### 6. Investment Judge
-
-조사 에이전트가 수집한 기업별 근거를 사용해 12개 항목을 평가합니다.
-
-| 조사 영역 | 평가 항목 |
-| --- | --- |
-| 기업·팀 | 경영진, 자금 조달, 평판 |
-| 기술·파이프라인 | 사업 단계, 제조, 기술(관문) |
-| 규제 | 법률·정책(관문), 소송, 해외 |
-| 시장·사업화 | 영업·마케팅, 경쟁, 투자금 회수 |
-
-Judge LLM은 항목마다 네 질문에 예·아니오로 답하고 근거 ID를 선택합니다.
-
-1. `-2` 기준의 나쁜 사실이 확인되었는가?
-2. `+2` 기준의 사실이 확인된 근거로 존재하는가?
-3. `+1` 기준의 일부만 있거나 기업 주장만 존재하는가?
-4. 지연·축소·분쟁 조짐과 같은 우려 신호가 있는가?
-
-점수 변환, 합산 및 최종 판정은 결정론적인 코드가 수행합니다. 기술과 법률·정책 관문, 네 조사 영역의 근거 존재 여부, 합계 `+5` 기준을 차례로 검사해 `적격`, `보류`, `부적격`을 결정합니다.
-
-### 7. Report Generator
-
-투자 판단 결과와 실제 사용한 근거만 이용해 기업별 투자 보고서를 작성합니다.
-
-- 적격 기업마다 5쪽 이내의 개별 보고서를 생성합니다.
-- 적격 보고서를 만든 뒤에도 다음 후보 평가를 계속합니다.
-- 적격 기업이 여러 곳이면 생성한 PDF를 평가 순서대로 하나로 합칩니다.
-- 적격 기업이 없으면 네 기업의 판정, 부적격·보류 사유 및 재검토 조건을 비교한 보고서를 생성합니다.
-- SUMMARY는 본문 작성 후 마지막에 압축하며 판정, 합계, 핵심 이유와 재검토 조건을 포함합니다.
-- 실제로 인용한 출처만 REFERENCE에 수록합니다.
-- 조사 근거가 없거나 상충하거나 기업 주장에만 의존한 항목은 한계점에 기록합니다.
+- **제어 vs 페이로드 분리** : 라우팅에 필요한 최소치(`next` · `task` · `area_status` · `rework_count` · `step_count` · `report_revisions` · `status`)만 제어 영역에 두고, 조사 · 판정 · 보고 결과는 페이로드 영역에 둔다. supervisor는 페이로드에서 근거 수만 세어 읽는다.
+- **관측성 위치** : 결정 로그(다음 담당 · 사유 · 허용 행동 · 부족 근거 · 검색어 · LLM 사용 · 교정 여부)는 State가 아니라 `outputs/logs/<trace_id>.jsonl`에 쌓는다. State에는 마지막 지시(`task.reason`)만 덮어써서 LangSmith 노드 출력에서 "왜"가 보이게 했다.
+- **지속성 비용** : 원문 페이지 · RAG 청크는 워커 안에서만 쓰고 State에 넣지 않는다. 인용은 300자로 자르고, 보고서 본문은 PDF 파일로 두고 경로만 남긴다. `report_sections`는 품질 평가 입력이라 State에 두지만 덮어쓰기이고 10쪽 상한으로 크기가 묶인다.
+- **상관** : `trace_id` 하나로 LangGraph `thread_id`(체크포인트), LangSmith `metadata.trace_id`, 결정 로그 · 실행 로그 파일명, 보고서 파일명을 잇는다.
+- **재개/복구** : SQLite 체크포인터에 매 단계가 저장되고, 재개에 필요한 상태(`current_idx` · `area_status` · `rework_count` · `read_urls` · `last_error`)가 State에 있다. `python app.py --resume <trace_id>`로 마지막 체크포인트부터 이어 간다. 조사 워커가 실패하면 예외로 멈추지 않고 `area_status=failed`와 에러를 남겨 supervisor가 재시도 여부를 정한다.
+- **동시 처리** : supervisor는 한 번에 워커 하나만 부르므로 같은 키에 동시에 쓰는 일이 없다. 그래서 동시성용 리듀서는 필요 없고, 누적 키에만 리듀서를 둔다. 재작업 · 재개로 같은 근거나 같은 기업 판정이 다시 들어와도 중복되지 않도록 `merge_evidence` · `merge_by_company`를 썼다.
+- **종료 보장** : 재작업은 기업당 2회 · 영역당 1회, 보고서 재작성은 2회까지다. 워커 호출 수가 `max_steps`(60)에 닿으면 조사를 멈추고 남은 필수 단계(판정 → 보고서 → 품질 평가)로 간다. 그 위에 마지막 상한과 LangGraph `recursion_limit`을 둔다.
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    START(["START"]) --> Select["후보 선택<br/>다음 기업"]
+![graph](docs/graph.png)
 
-    subgraph Step1["1단계 조사 - 병렬"]
-        Company["기업 조사<br/>웹 검색"]
-        Tech["기술·파이프라인<br/>RAG 기술 + 웹"]
-    end
-
-    subgraph Step2["2단계 조사 - 병렬"]
-        Regulation["규제<br/>RAG 규제 + 웹"]
-        Market["시장·사업화<br/>RAG 시장·사업성 + 웹"]
-    end
-
-    Select --> Company
-    Select --> Tech
-    Tech -->|"파이프라인 목록<br/>물질명·적응증·단계"| Regulation
-    Tech -->|"파이프라인 목록<br/>물질명·적응증·단계"| Market
-    Company --> Judge["투자 판단<br/>예·아니오: LLM<br/>점수·판정: 코드"]
-    Regulation --> Judge
-    Market --> Judge
-
-    Judge --> Verdict{"판정"}
-    Verdict -->|"적격"| Report["기업별 보고서 생성"]
-    Verdict -->|"보류·부적격"| Remaining{"남은 후보?"}
-    Report --> Remaining
-    Remaining -->|"있음"| Select
-    Remaining -->|"없음 · 보고서 있음"| Merge["적격 보고서 PDF 병합"]
-    Remaining -->|"없음 · 적격 없음"| NoQualified["적격 없음 보고서<br/>4개 기업 비교"]
-    Merge --> END(["END"])
-    NoQualified --> END
-```
-
-투자 판단은 기업 조사, 규제, 시장·사업화가 모두 끝난 뒤 기업당 한 번 실행합니다. 적격 판정이 나와도 평가를 중단하지 않으며 종료 조건은 후보 4곳의 평가 완료입니다.
+- 실선 = 워커 → supervisor 복귀, 점선 = supervisor의 조건부 분기(`add_conditional_edges(route=state["next"])`)
+- supervisor의 판단 순서: 단계 상한 → 4곳 판정 완료면 보고서 · 품질 평가 → 현재 기업이 없으면 후보 선택 → 미조사 영역(규제 · 시장은 기술 다음) → 근거 부족이고 예산이 남았으면 재작업 → 그 밖에는 판정
 
 ## Directory Structure
 
 ```
-AI_Investment_project-develop/
-├── agents/                    # 조사 에이전트 모듈(통합 예정)
-│   ├── common.py              # 공통 조사 로직 (검색 · 원문 검증 · 근거 변환)
-│   ├── select_candidate.py    # 평가 순서대로 다음 기업 선택
-│   ├── company.py             # 경영진 · 자금 조달 · 평판 조사
-│   ├── tech_pipeline.py       # 기술 검증 · 사업 단계 · 제조 · 물질별 파이프라인 조사
-│   ├── regulation.py          # 물질·적응증 단위 규제 · 소송 · 해외 진행 조사
-│   └── market.py              # 물질·적응증 단위 시장 · 경쟁 · 사업화 · 투자금 회수 조사
-├── data/
-│   ├── raw/                   # 원본 PDF 6종
-│   ├── processed/             # 파싱·청킹·비전 전사 결과
-│   ├── index/                 # FAISS 인덱스
-│   └── eval/                  # 검색 평가셋과 실험 결과
-├── judge/
-│   ├── node.py                # Judge LLM 호출과 State 결과 생성
-│   ├── rubric.py              # 12개 위험요인 평가 기준
-│   ├── schema.py              # LLM 구조화 출력 스키마
-│   └── scorer.py              # 점수·판정·민감도 계산
-├── prompts/                   # 프롬프트
-│   ├── judge.md
-│   └── research/
-│       ├── company.md
-│       ├── market.md
-│       ├── regulation.md
-│       └── tech.md
-├── rag/
-│   ├── settings.py
-│   ├── sources.py              # 문서 출처 정의
-│   ├── types.py
-│   ├── download_docs.py        # 문서 다운로드
-│   ├── parse_pdfs.py           # PDF 파싱
-│   ├── vision.py               # 비전 기반 파싱
-│   ├── prepare.py              # 청킹/전처리
-│   ├── build_index.py          # FAISS 인덱스 생성
-│   ├── retriever.py            # 검색기
-│   ├── rag_search.py           # 검색 실행
-│   ├── eval_retriever.py       # 검색기 평가
-│   └── experiment.py           # 실험 스크립트
-├── outputs/                    # 생성된 리포트 저장
-├── tests/                      # Graph·RAG·Judge 테스트
-├── tools/
-│   ├── evidence.py             # 근거 수집
-│   └── web.py                  # 웹 검색
-├── config.py                   # 후보·평가 항목·판정 기준 설정
-├── graph.py                    # 전체 LangGraph 조립
-├── state.py                    # LangGraph 공유 State
-├── app.py                      # 전체 파이프라인 시작 파일
-├── requirements.txt            # Python 의존성
+├── agents/
+│   ├── supervisor.py          # 충분성 · 허용 행동 · LLM 선택 · 가드 · 결정 로그
+│   ├── common.py              # 조사 공통: 검색 · 원문 검증 · 재작업 지시 반영 · 실패 처리
+│   ├── select_candidate.py
+│   ├── company.py · tech_pipeline.py · regulation.py · market.py
+├── judge/                     # 12항목 LLM 예/아니오 → 코드 점수 · 판정
+├── report/                    # 통합 보고서 문장 구조 · 재작성 · PDF · REFERENCE
+├── quality/evaluator.py       # 품질 평가 (Hybrid)
+├── prompts/                   # supervisor · judge · 조사 · 보고서 · 품질 프롬프트
+├── rag/ · data/               # Agentic RAG와 문서 풀 (main 브랜치와 동일)
+├── tools/                     # 웹 검색 · 원문 수집, Evidence 타입
+├── outputs/                   # 보고서 PDF, logs/(결정 · 실행 로그)
+├── docs/graph.png
+├── tests/
+├── config.py · state.py · graph.py · app.py
 └── README.md
 ```
 
 ## Usage
 
-### 1. 환경 준비
-
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`.env` 파일에 OpenAI API 키를 설정합니다.
+`.env`에 키를 넣는다.
 
 ```
-OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_KEY=...
+TAVILY_API_KEY=...
+LANGSMITH_API_KEY=...        # 트레이스를 볼 때
+LANGSMITH_TRACING=true
 ```
-
-### 2. RAG 준비
 
 ```bash
-python -m rag.prepare
+python app.py                                        # 전체 실행
+python app.py --pages-per-node 3 --urls-per-query 2  # 조사량을 줄인 실행
+python app.py --resume <trace_id>                    # 중단된 실행 이어서
+pytest                                               # LLM 없이 흐름 검증
 ```
 
-저장소에 비전 전사 캐시가 포함되어 있어 RAG 준비 과정은 API 키 없이 실행할 수 있습니다. 최초 실행 시 `BAAI/bge-m3` 모델 약 2.3GB를 다운로드합니다.
+실행하면 `trace_id`, supervisor의 결정과 사유, 기업별 판정, 품질 평가 결과가 한 줄씩 출력되고 `outputs/<trace_id>_report.pdf`, `outputs/logs/<trace_id>.json(l)`이 생긴다.
 
-### 3. RAG 검색
+## 한계
 
-```python
-from rag.rag_search import rag_search
-
-hits = rag_search(
-    "희귀의약품 지정이 신약 개발 위험에서 어떤 의미인가?",
-    "regulation",
-)
-
-for hit in hits:
-    print(hit["doc"], hit["page"], hit["text"])
-```
-
-`doc_type`은 `regulation`, `tech`, `market` 중 하나를 사용합니다.
-
-### 4. 검색 설정 실험
-
-```bash
-python -m rag.experiment
-```
-
-실험 결과는 `data/eval/results.md`와 `data/eval/best_config.json`에 저장됩니다.
-
-### 5. 테스트
-
-```bash
-pytest
-```
-
-### 6. 전체 에이전트 실행
-
-```bash
-python app.py
-```
-
-## Retrieval Evaluation
-
-평가셋 34문항에 대해 정답 문서·페이지를 기준으로 검색 성능을 측정했습니다.
-
-| 설정 | 값 |
-| --- | --- |
-| Chunking | 500자, 50자 overlap (`r500`) |
-| Embedding | `BAAI/bge-m3` |
-| Retrieval | FAISS |
-| Hit Rate@3 | **0.824** |
-| MRR | **0.703** |
-
-설계 단계에서는 BM25와 Dense 검색을 결합한 하이브리드 검색을 가정했으나, 실제 평가에서는 FAISS 단독 검색이 BM25 및 앙상블보다 높은 성능을 보여 최종 설정으로 선택했습니다. 세부 결과는 `data/eval/results.md`에서 확인할 수 있습니다.
+- 비상장 스타트업은 공시 · 독립 검증 자료가 적어, 재작업을 해도 관문 근거를 찾지 못해 보류로 끝나는 경우가 많다. 보류는 "근거가 부족하다"는 뜻이지 부정 판단이 아니다.
+- "출처 도메인이 다르다"가 "독립 출처"를 보장하지는 않는다(같은 보도자료를 여러 매체가 받아 쓸 수 있다).
+- 품질 평가 Judge(gpt-4.1)와 생성 모델(gpt-4.1-mini)이 같은 회사 모델이라 자기 선호 편향이 남을 수 있다. 수업 환경에서 쓸 수 있는 API가 OpenAI뿐이라 모델 크기만 나눴고, `QUALITY_MODEL` 환경변수로 바꿀 수 있다.
+- LLM 판정(라우팅 사유 · 추출 · 예/아니오 · 품질)은 같은 입력에도 달라질 수 있다. 그래서 점수 · 판정 · 통과 여부 · 상한은 코드로 고정했다.
+- 비용은 페이지 상한(워커당 원문 수), 재작업 · 재작성 예산, 허용 행동이 하나면 supervisor LLM을 부르지 않는 방식으로 묶었다. 응답 캐시는 아직 없다.
 
 ## Contributors
 
 - 김윤성: RAG 문서·검색 파이프라인, 문서 수집·전처리, 임베딩 처리, `rag_search` 도구 제작
 - 이세영: 에이전트 그래프, LangGraph State·조건 분기·병렬 실행 구현, 에이전트 제작, 채점·판정 로직
-- 이승호: RAG 문서·검색 파이프라인, 문서 수집·전처리, 임베딩 처리, `rag_search` 도구 제작
+- 이승호: RAG 문서·검색 파이프라인, `rag_search` 도구 제작 / Supervisor 패턴 전환(그래프 · State · 근거 충분성 루프 · 품질 평가 루프 설계와 구현)
 - 이준영: RAG 문서·검색 파이프라인, 문서 수집·전처리, 임베딩 처리, `rag_search` 도구 제작
 - 정문기: 에이전트 그래프, LangGraph State·조건 분기·병렬 실행 구현, 에이전트 제작, 채점·판정 로직

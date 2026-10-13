@@ -142,6 +142,14 @@ def _html_text(content: bytes) -> tuple[str, str | None]:
     return text, published
 
 
+def _html_title(content: bytes) -> str | None:
+    """REFERENCE에 쓸 문서 제목. og:title이 있으면 사이트 이름이 덜 붙어 있어 먼저 쓴다."""
+    soup = BeautifulSoup(content, "html.parser")
+    meta = soup.find("meta", attrs={"property": "og:title"})
+    title = (meta.get("content") if meta else None) or (soup.title.get_text(" ", strip=True) if soup.title else None)
+    return " ".join(title.split())[:200] if title else None
+
+
 def _pdf_text(content: bytes) -> str:
     reader = PdfReader(BytesIO(content))
     pages = []
@@ -168,9 +176,10 @@ def fetch_page(url: str) -> dict[str, str | None]:
         or urlsplit(final_url).path.lower().endswith(".pdf")
         or response.content.lstrip().startswith(b"%PDF-")
     ):
-        text, published = _pdf_text(response.content), None
+        text, published, title = _pdf_text(response.content), None, None
     else:
         text, published = _html_text(response.content)
+        title = _html_title(response.content)
     if not text.strip():
         raise ValueError(f"원문 텍스트를 추출하지 못했습니다: {final_url}")
     return {
@@ -178,4 +187,5 @@ def fetch_page(url: str) -> dict[str, str | None]:
         "text": text,
         "published": published,
         "accessed": date.today().isoformat(),
+        "title": title,
     }

@@ -21,3 +21,7 @@ data/processed/*
 data/index/*
 !data/index/.gitkeep
 !data/index/bge-m3_r500/
+
+# 실행 산출물 — 체크포인트 DB · 실행 로그는 실행마다 새로 생긴다
+outputs/checkpoints.sqlite*
+outputs/logs/

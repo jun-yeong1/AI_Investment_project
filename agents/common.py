@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
+from langchain_core.runnables.config import ContextThreadPoolExecutor
 from pydantic import BaseModel, Field
 
 from config import JUDGE_MODEL, JUDGE_PROVIDER, today
@@ -39,6 +42,8 @@ MAX_URLS_PER_QUERY = _positive_int_setting("AGENT_URLS_PER_QUERY", 3)
 MAX_PAGES_PER_NODE = _positive_int_setting("AGENT_PAGES_PER_NODE", 8)
 MAX_PAGE_CHARS = _positive_int_setting("AGENT_PAGE_CHARS", 16000)
 MAX_RAG_HIT_CHARS = _positive_int_setting("AGENT_RAG_HIT_CHARS", 2000)
+EXTRACT_WORKERS = _positive_int_setting("AGENT_EXTRACT_WORKERS", 4)
+MAX_QUOTE_CHARS = 300   # 체크포인트마다 저장되는 State가 원문 크기만큼 커지지 않게 인용만 짧게 남긴다
 PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts" / "research"
 
 
@@ -69,6 +74,7 @@ class FetchedPage:
     text: str
     published: str | None
     accessed: str
+    title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,12 @@ def _normalize_space(value: str) -> str:
 def _compact(value: str) -> str:
     """공백·문장부호를 무시하고 기업명과 물질명을 원문 인용과 대조한다."""
     return "".join(char for char in value.casefold() if char.isalnum())
+
+
+def _own_site(url: str, aliases: Iterable[str]) -> bool:
+    """도메인에 기업 영문명 · ID가 들어 있으면 기업이 운영하는 사이트로 본다 (예: deargen.me)."""
+    host = _compact(urlsplit(url).netloc)
+    return any(len(_compact(alias)) >= 4 and _compact(alias) in host for alias in aliases)
 
 
 def _urls(search_result: Any) -> Iterable[str]:
@@ -125,6 +137,7 @@ def _page(raw: Any, requested_url: str) -> FetchedPage:
         text=text,
         published=read("published"),
         accessed=str(read("accessed") or today()),
+        title=read("title"),
     )
 
 
@@ -215,8 +228,16 @@ def research(
     company = state.get("company")
     if not company or not company.get("company_id") or not company.get("name"):
         raise ValueError("조사 노드 실행 전에 company를 선택해야 합니다")
+    task = state.get("task") or {}
+    rework = task.get("area") == area and task.get("mode") == "rework"
+    if rework:
+        # supervisor가 부족한 항목을 겨냥해 준 검색어로 다시 찾는다. 기준 문서(RAG)는 첫 조사에서 이미 썼다.
+        queries = list(task.get("queries") or queries)
+        rag_query = None
     services = tools or default_tools(with_rag=rag_query is not None)
     company_id, company_name = company["company_id"], company["name"]
+    # 영어 원문(임상 등록 · 논문 · 해외 보도)은 영문명으로만 나오는 경우가 많다
+    aliases = tuple(a for a in (company_name, company_id, company.get("en")) if a)
 
     rag_context = ""
     web_fallback_queries: list[str] = []
@@ -237,12 +258,17 @@ def research(
         rag_context = _rag_context(list(unique_hits.values()))
 
     evidence: list[Evidence] = []
-    pipeline: list[PipelineItem] = []
-    seen_urls: set[str] = set()
+    pipeline: list[PipelineItem] = list(state.get("pipeline", [])) if include_pipeline else []
+    # 이미 읽은 원문은 재작업에서 다시 열지 않는다
+    seen_urls: set[str] = set(state.get("read_urls", []))
+    read_now: list[str] = []
+    pages: list[FetchedPage] = []
     pages_read = 0
-    seen_quotes: set[tuple[str, str]] = set()
-    seen_pipeline: set[tuple[str, str, str]] = set()
-    item_counts = {item: 0 for item in items}
+    mine = [e for e in state.get("evidence", []) if e.get("company_id") == company_id]
+    seen_quotes: set[tuple[str, str]] = {(e["source"], e["quote"]) for e in mine}
+    seen_pipeline: set[tuple[str, str, str]] = {(p["substance"], p["indication"], p["stage"]) for p in pipeline}
+    # 재작업으로 같은 항목 근거가 또 생겨도 ID가 겹치지 않게 기존 개수부터 센다
+    item_counts = {item: sum(1 for e in mine if e.get("item") == item) for item in items}
 
     # RAG가 실패한 항목의 웹 보강을 일반 기업 검색보다 먼저 수행한다.
     for query in (*web_fallback_queries, *queries):
@@ -255,6 +281,7 @@ def research(
             if url in seen_urls:
                 continue
             seen_urls.add(url)
+            read_now.append(url)
             try:
                 page = _page(services.fetch_page(url), url)
             except (ValueError, OSError) as exc:
@@ -262,59 +289,88 @@ def research(
                 continue
             if not page.text.strip():
                 continue
+            # 검색 결과가 다른 회사 기사를 주는 경우가 있어 목표 기업명이 없는 원문은 조사 예산에서 뺀다
+            if not any(_compact(alias) in _compact(page.text[:MAX_PAGE_CHARS]) for alias in aliases):
+                continue
             pages_read += 1
             pages_for_query += 1
-            analysis = services.extract(area, company_name, items, page, rag_context)
-            if not isinstance(analysis, PageAnalysis):
-                analysis = PageAnalysis.model_validate(analysis)
+            pages.append(page)
 
-            page_text = _normalize_space(page.text[:MAX_PAGE_CHARS])
-            for finding in analysis.findings:
-                quote = _normalize_space(finding.quote)
-                quote_key = (page.url, quote)
-                # 원문에 없는 인용과 동일 인용의 중복 채점을 막는다.
-                if (
-                    finding.item not in items
-                    or not finding.fact.strip()
-                    or not quote
-                    or quote not in page_text
-                    or quote_key in seen_quotes
-                ):
-                    continue
-                seen_quotes.add(quote_key)
-                item_counts[finding.item] += 1
-                evidence.append(
-                    Evidence(
-                        id=make_evidence_id(company_id, finding.item, item_counts[finding.item]),
-                        company_id=company_id,
-                        item=finding.item,
-                        fact=finding.fact.strip(),
-                        quote=quote,
-                        status=finding.status,
-                        source=page.url,
-                        page=None,
-                        published=page.published,
-                        accessed=page.accessed,
-                    )
+    # 원문 수집은 순서대로(페이지 상한 · 실패 시 다음 URL), 느린 LLM 추출만 동시에 돌린다
+    def analyze(page: FetchedPage) -> PageAnalysis:
+        analysis = services.extract(area, company_name, items, page, rag_context)
+        return analysis if isinstance(analysis, PageAnalysis) else PageAnalysis.model_validate(analysis)
+
+    # 트레이스 맥락을 스레드로 넘겨야 LangSmith에서 추출 호출이 이 워커 아래 한 트리로 보인다
+    with ContextThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
+        analyses = list(pool.map(analyze, pages))
+
+    for page, analysis in zip(pages, analyses):
+        page_text = _normalize_space(page.text[:MAX_PAGE_CHARS])
+        for finding in analysis.findings:
+            quote = _normalize_space(finding.quote)
+            quote_key = (page.url, quote)
+            # 원문에 없는 인용과 동일 인용의 중복 채점을 막는다.
+            if (
+                finding.item not in items
+                or not finding.fact.strip()
+                or not quote
+                or quote not in page_text
+                or quote_key in seen_quotes
+            ):
+                continue
+            seen_quotes.add(quote_key)
+            item_counts[finding.item] += 1
+            # 기업 자체 사이트의 내용은 LLM이 확인됨으로 분류해도 독립 출처가 아니므로 기업 주장만으로 둔다
+            status = "기업 주장만" if _own_site(page.url, aliases[1:]) else finding.status
+            evidence.append(
+                Evidence(
+                    id=make_evidence_id(company_id, finding.item, item_counts[finding.item]),
+                    company_id=company_id,
+                    item=finding.item,
+                    fact=finding.fact.strip(),
+                    quote=quote[:MAX_QUOTE_CHARS],
+                    status=status,
+                    source=page.url,
+                    page=None,
+                    published=page.published,
+                    accessed=page.accessed,
+                    title=page.title,
                 )
+            )
 
-            if include_pipeline:
-                for found in analysis.pipeline:
-                    key = (found.substance.strip(), found.indication.strip(), found.stage.strip())
-                    quote = _normalize_space(found.quote)
-                    compact_quote = _compact(quote)
-                    # 여러 기업의 물질을 나열한 원문에서 다른 회사의 파이프라인을 가져오지 않는다.
-                    if (
-                        all(key)
-                        and quote in page_text
-                        and _compact(key[0]) in compact_quote
-                        and any(_compact(alias) in compact_quote for alias in (company_name, company_id))
-                        and key not in seen_pipeline
-                    ):
-                        seen_pipeline.add(key)
-                        pipeline.append(PipelineItem(substance=key[0], indication=key[1], stage=key[2]))
+        if include_pipeline:
+            for found in analysis.pipeline:
+                key = (found.substance.strip(), found.indication.strip(), found.stage.strip())
+                quote = _normalize_space(found.quote)
+                compact_quote = _compact(quote)
+                # 여러 기업의 물질을 나열한 원문에서 다른 회사의 파이프라인을 가져오지 않는다.
+                if (
+                    all(key)
+                    and quote in page_text
+                    and _compact(key[0]) in compact_quote
+                    and any(_compact(alias) in compact_quote for alias in aliases)
+                    and key not in seen_pipeline
+                ):
+                    seen_pipeline.add(key)
+                    pipeline.append(PipelineItem(substance=key[0], indication=key[1], stage=key[2]))
 
-    result: dict[str, Any] = {"evidence": evidence}
+    result: dict[str, Any] = {"evidence": evidence, "read_urls": [*state.get("read_urls", []), *read_now]}
     if include_pipeline:
         result["pipeline"] = pipeline
     return result
+
+
+def run_area(state: State, *, area: str, **kwargs: Any) -> dict[str, Any]:
+    """조사 워커 공통 래퍼. 실패해도 그래프를 멈추지 않고 영역 상태와 에러를 supervisor에게 돌려준다."""
+    status = dict(state.get("area_status", {}))
+    try:
+        result = research(state, area=area, **kwargs)
+    except Exception as exc:
+        LOGGER.warning("%s 조사 실패: %s", area, exc)
+        status[area] = "failed"
+        error = {"node": area, "type": type(exc).__name__, "message": str(exc)[:300],
+                 "ts": datetime.now().astimezone().isoformat(timespec="seconds")}
+        return {"area_status": status, "errors": [error], "last_error": error}
+    status[area] = "done"
+    return {**result, "area_status": status}

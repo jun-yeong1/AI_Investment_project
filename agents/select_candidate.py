@@ -1,6 +1,6 @@
 """평가 순서대로 다음 기업을 선택한다."""
 
-from config import CANDIDATES
+from config import AREAS, CANDIDATES
 from state import State
 
 
@@ -18,8 +18,10 @@ def select_candidate(state: State) -> dict:
         "scores": {},
         "total": 0,
         "verdict": None,
-        "report_sections": {},
-        "references": [],
+        # 조사 진행 상태도 기업 단위라 새 기업에서 처음부터 센다
+        "area_status": {area: "pending" for area in AREAS},
+        "rework_count": {},
+        "read_urls": [],
     }
 
 

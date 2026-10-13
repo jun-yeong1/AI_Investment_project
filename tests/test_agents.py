@@ -3,16 +3,15 @@
 import unittest
 from unittest.mock import patch
 
-from langgraph.graph import END, START, StateGraph
-
 from agents.common import FetchedPage, PageAnalysis, ResearchTools
 from agents.company import company_node
 from agents.market import market_node
 from agents.regulation import regulation_node
 from agents.select_candidate import select_candidate
+from agents.supervisor import Decision, supervisor_node
 from agents.tech_pipeline import tech_pipeline_node
 from config import CANDIDATES
-from state import State
+from graph import build_graph
 
 
 def fake_tools(url: str, text: str, analysis: dict, *, rag_results: bool = True):
@@ -24,7 +23,9 @@ def fake_tools(url: str, text: str, analysis: dict, *, rag_results: bool = True)
 
     def fetch_page(requested_url):
         calls["fetched"].append(requested_url)
-        return FetchedPage(requested_url, text, "2026-09-01", "2026-09-30")
+        # 실제 원문처럼 목표 기업명이 본문에 있어야 조사 대상이 된다
+        names = " ".join(candidate["name"] for candidate in CANDIDATES)
+        return FetchedPage(requested_url, f"{names} 관련 기사. {text}", "2026-09-01", "2026-09-30")
 
     def rag_search(query, doc_type, pipeline=None):
         calls["rag"].append((query, doc_type, pipeline))
@@ -154,7 +155,8 @@ class AgentContractTests(unittest.TestCase):
             },
         )
         result = tech_pipeline_node(state, tools=tools)
-        self.assertEqual(result, {"evidence": [], "pipeline": []})
+        self.assertEqual((result["evidence"], result["pipeline"]), ([], []))
+        self.assertEqual(result["area_status"]["tech"], "done")
 
     def test_other_company_pipeline_is_not_passed_to_regulation(self):
         state = {"company": CANDIDATES[0]}
@@ -165,6 +167,29 @@ class AgentContractTests(unittest.TestCase):
                            "quote": "다른 회사의 BAL0891은 고형암 임상 단계다"}]},
         )
         self.assertEqual(tech_pipeline_node(state, tools=tools)["pipeline"], [])
+
+    def test_page_without_company_name_is_skipped(self):
+        state = {"company": CANDIDATES[1]}
+        services = ResearchTools(
+            web_search=lambda query: ["https://example.org/other"],
+            fetch_page=lambda url: FetchedPage(url, "테슬라가 반도체 엔지니어를 채용한다.", None, "2026-10-13"),
+            extract=lambda *args: PageAnalysis.model_validate(
+                {"findings": [{"item": "management", "fact": "채용", "quote": "반도체 엔지니어를 채용한다", "status": "확인됨"}]}),
+        )
+        result = company_node(state, tools=services)
+        self.assertEqual(result["evidence"], [])
+
+    def test_company_own_site_is_never_confirmed(self):
+        state = {"company": CANDIDATES[1]}
+        services = ResearchTools(
+            web_search=lambda query: ["https://deargen.me/technology"],
+            fetch_page=lambda url: FetchedPage(url, "Deargen의 Dr.UG 플랫폼은 신약 후보를 설계한다.", None, "2026-10-13"),
+            extract=lambda *args: PageAnalysis.model_validate(
+                {"findings": [{"item": "technology", "fact": "Dr.UG 보유", "quote": "Dr.UG 플랫폼은 신약 후보를 설계한다", "status": "확인됨"}]}),
+            rag_search=lambda *args, **kwargs: [],
+        )
+        result = tech_pipeline_node(state, tools=services)
+        self.assertEqual([e["status"] for e in result["evidence"]], ["기업 주장만"])
 
     def test_rag_miss_uses_web_after_rag_retry(self):
         state = {"company": CANDIDATES[0]}
@@ -179,7 +204,7 @@ class AgentContractTests(unittest.TestCase):
         self.assertTrue(any("스탠다임" in query and "AI 신약 발굴" in query for query in calls["queries"]))
         self.assertEqual(result["evidence"][0]["source"], "https://example.org/tech")
 
-    def test_langgraph_waits_for_all_research_before_judge(self):
+    def test_supervisor_passes_tech_pipeline_to_regulation_and_market(self):
         company_tools, _ = fake_tools(
             "https://example.org/company", "창업자는 제약사 경력이 있다.",
             {"findings": [{"item": "management", "fact": "제약사 경력", "quote": "제약사 경력이 있다", "status": "확인됨"}]},
@@ -200,38 +225,35 @@ class AgentContractTests(unittest.TestCase):
         judged = []
 
         def judge(state):
-            handoff = {
-                "company": state["company"],
-                "pipeline": state["pipeline"],
-                "evidence": [
-                    item for item in state["evidence"]
-                    if item["company_id"] == state["company"]["company_id"]
-                ],
-            }
-            judged.append(handoff)
-            return {"scores": {"received": len(handoff["evidence"])}}
+            company = state["company"]
+            judged.append([e for e in state["evidence"] if e["company_id"] == company["company_id"]])
+            return {"evaluations": [{"company_id": company["company_id"], "name": company["name"],
+                                     "verdict": "보류", "total": 0}]}
 
-        graph = StateGraph(State)
-        graph.add_node("select", select_candidate)
-        graph.add_node("company", lambda state: company_node(state, tools=company_tools))
-        graph.add_node("tech", lambda state: tech_pipeline_node(state, tools=tech_tools))
-        graph.add_node("regulation", lambda state: regulation_node(state, tools=regulation_tools))
-        graph.add_node("market", lambda state: market_node(state, tools=market_tools))
-        graph.add_node("judge", judge)
-        graph.add_edge(START, "select")
-        graph.add_edge("select", "company")
-        graph.add_edge("select", "tech")
-        graph.add_edge("tech", "regulation")
-        graph.add_edge("tech", "market")
-        graph.add_edge(["company", "regulation", "market"], "judge")
-        graph.add_edge("judge", END)
+        def choose(state, suff, allowed, why):
+            return Decision(next=allowed[0], reason="테스트", queries=["재작업 검색어"])
 
-        result = graph.compile().invoke({"candidates": CANDIDATES, "current_idx": -1, "evidence": []})
+        nodes = {
+            "supervisor": lambda state: supervisor_node(state, choose=choose),
+            "select": select_candidate,
+            "company": lambda state: company_node(state, tools=company_tools),
+            "tech": lambda state: tech_pipeline_node(state, tools=tech_tools),
+            "regulation": lambda state: regulation_node(state, tools=regulation_tools),
+            "market": lambda state: market_node(state, tools=market_tools),
+            "judge": judge,
+            "report": lambda state: {"report_sections": {"revision": 0}, "report_revisions": 0},
+            "quality": lambda state: {"quality": {"passed": True, "revision": 0, "summary": ""}},
+        }
+        result = build_graph(nodes).invoke({"trace_id": "test", "candidates": CANDIDATES[:1], "current_idx": -1,
+                                            "evidence": [], "evaluations": [], "step_count": 0, "max_steps": 30})
         self.assertEqual(len(judged), 1)
-        self.assertEqual(result["scores"], {"received": 4})
-        self.assertEqual({item["item"] for item in judged[0]["evidence"]}, {"management", "stage", "regulation", "sales"})
+        self.assertEqual({item["item"] for item in judged[0]}, {"management", "stage", "regulation", "sales"})
+        # 기술 워커가 찾은 물질은 supervisor를 거쳐 State로 규제 · 시장 워커에 전달된다
         self.assertTrue(any("ST-01 폐암" in query for query in regulation_calls["queries"]))
         self.assertTrue(any("ST-01 폐암" in query for query in market_calls["queries"]))
+        # 확인됨 근거가 없던 기술 · 시장은 재작업 검색어로 한 번 더 조사됐다
+        self.assertEqual(result["rework_count"], {"tech": 1, "market": 1})
+        self.assertEqual(result["status"], "done")
 
 
 if __name__ == "__main__":

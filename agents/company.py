@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from agents.common import ResearchTools, research
+from agents.common import ResearchTools, run_area
 from config import FUNDING_WINDOW_YEARS, ITEMS as RUBRIC_ITEMS
 from state import State
 
@@ -18,7 +18,7 @@ def company_node(state: State, *, tools: ResearchTools | None = None) -> dict:
         f"{name} {recent_year} 이후 투자 유치 후속 투자 금액 구조조정",
         f"{name} 정부 과제 선정 수상 연구 부정 논란",
     )
-    return research(
+    return run_area(
         state,
         area="company",
         items=ITEMS,

@@ -1,94 +1,165 @@
-"""가짜 조사 · 보고서 노드로 흐름 검증. 투자 판단은 실제 scorer를 쓰고 LLM만 대신한다."""
+"""가짜 워커로 Supervisor 흐름을 검증한다. supervisor의 충분성 · 허용 행동 · 가드는 실제 코드, LLM 선택만 대신한다."""
 import config
-from graph import build_graph
+from agents.supervisor import Decision, allowed_actions, sufficiency, supervisor_node
+from graph import WORKERS, build_graph
 from judge.node import summarize
 
+AREA_ITEMS = {area: [c for c, (_, a, _) in config.ITEMS.items() if a == area] for area in config.AREAS}
 
-def make_nodes(qualified_ids, log):
+
+def first_allowed(state, suff, allowed, why):
+    """LLM 대신: 허용 행동의 첫 번째를 고르고, 재작업이면 검색어를 준다."""
+    return Decision(next=allowed[0], reason="테스트", queries=[f"재작업 {allowed[0]}"])
+
+
+def make_nodes(plan, log, *, quality_fail_until=1):
+    """plan[company_id][area] = (첫 조사 상태, 재작업 상태). 상태가 None이면 근거 없음, 'error'면 예외."""
+
+    def research(area):
+        def node(state):
+            cid = state["company"]["company_id"]
+            rework = state.get("task", {}).get("mode") == "rework"
+            log.append((cid, area, "rework" if rework else "initial"))
+            outcome = plan.get(cid, {}).get(area, (None, None))[1 if rework else 0]
+            status = dict(state.get("area_status", {}))
+            if outcome == "error":
+                status[area] = "failed"
+                return {"area_status": status, "errors": [{"node": area, "type": "ValueError",
+                                                           "message": "검색 실패", "ts": "t"}]}
+            status[area] = "done"
+            evidence = [] if outcome is None else [{
+                "id": f"{cid}-{item}-{'r' if rework else 'i'}", "company_id": cid, "item": item,
+                "fact": "f", "quote": f"{item}-{rework}", "status": outcome, "source": f"https://{area}.example/{rework}",
+                "page": None, "published": None, "accessed": "d"} for item in AREA_ITEMS[area]]
+            update = {"area_status": status, "evidence": evidence}
+            if area == "tech":
+                update["pipeline"] = [{"substance": "s", "indication": "i", "stage": "1상"}]
+            return update
+        return node
+
     def select(state):
         idx = state["current_idx"] + 1
-        return {"current_idx": idx, "company": state["candidates"][idx]}
-
-    def ev(state, item, status="확인됨"):
-        c = state["company"]["company_id"]
-        return {"id": f"{c}-{item}", "company_id": c, "item": item, "fact": "f", "quote": "",
-                "status": status, "source": "s", "page": None, "published": None, "accessed": "d"}
-
-    def company(state):
-        return {"evidence": [ev(state, i) for i in ("management", "funding", "reputation")
-                             if state["company"]["company_id"] in qualified_ids]}
-
-    def tech(state):
-        items = ("stage", "manufacturing", "technology")
-        ok = state["company"]["company_id"] in qualified_ids
-        # 못 찾으면 빈 목록을 반환해 이전 기업 값이 남지 않게 한다(설계서 D-1)
-        pipeline = [{"substance": "s", "indication": "i", "stage": "1상"}] if ok else [{"substance": "x", "indication": "i", "stage": "발굴"}]
-        return {"pipeline": pipeline,
-                "evidence": [ev(state, i) for i in items if ok]}
-
-    def regulation(state):
-        assert state["pipeline"], "규제는 기술·파이프라인의 pipeline을 받아야 한다"
-        ok = state["company"]["company_id"] in qualified_ids
-        return {"evidence": [ev(state, i) for i in ("regulation", "litigation", "overseas") if ok]}
-
-    def market(state):
-        assert state["pipeline"]
-        ok = state["company"]["company_id"] in qualified_ids
-        return {"evidence": [ev(state, i) for i in ("sales", "competition", "exit") if ok]}
+        return {"current_idx": idx, "company": state["candidates"][idx],
+                "area_status": {a: "pending" for a in config.AREAS}, "rework_count": {}, "pipeline": []}
 
     def judge(state):
         c = state["company"]
         mine = [e for e in state["evidence"] if e["company_id"] == c["company_id"]]
-        by_item = {e["item"]: e for e in mine}
+        by_item = {}
+        for e in mine:
+            by_item.setdefault(e["item"], []).append(e["id"])
         answers = [{"item": code, "q1_neg": False, "q2_pos": code in by_item, "q3_partial": False,
-                    "q4_concern": False, "evidence_ids": [by_item[code]["id"]] if code in by_item else [],
+                    "q4_concern": False, "evidence_ids": by_item.get(code, []),
                     "reason": "r"} for code in config.ITEMS]
         return summarize(c, answers, mine)
 
     def report(state):
-        log.append(("report", state["company"]["company_id"]))
-        return {"reports": [f"{state['company']['company_id']}.pdf"]}
+        revision = state["report_sections"]["revision"] + 1 if state.get("report_sections") else 0
+        log.append(("report", revision))
+        return {"report_sections": {"revision": revision}, "report_path": "r.pdf", "report_pages": 3,
+                "report_revisions": revision}
 
-    def no_qualified(state):
-        log.append(("no_qualified", None))
-        return {}
+    def quality(state):
+        revision = state["report_sections"]["revision"]
+        passed = revision >= quality_fail_until
+        log.append(("quality", passed))
+        return {"quality": {"passed": passed, "revision": revision, "summary": "테스트"}}
 
-    return {"select": select, "company": company, "tech": tech, "regulation": regulation,
-            "market": market, "judge": judge, "report": report, "no_qualified": no_qualified}
+    nodes = {area: research(area) for area in config.AREAS}
+    nodes.update(select=select, judge=judge, report=report, quality=quality,
+                 supervisor=lambda state: supervisor_node(state, choose=first_allowed))
+    return nodes
 
 
-def run(qualified_ids):
+def run(plan, *, max_steps=config.MAX_STEPS, quality_fail_until=1):
     log = []
-    graph = build_graph(make_nodes(qualified_ids, log))
-    state = graph.invoke({"candidates": config.CANDIDATES, "current_idx": -1})
+    graph = build_graph(make_nodes(plan, log, quality_fail_until=quality_fail_until))
+    state = graph.invoke({"trace_id": "test", "candidates": config.CANDIDATES, "current_idx": -1,
+                          "evidence": [], "evaluations": [], "step_count": 0, "max_steps": max_steps,
+                          "report_revisions": 0})
     return state, log
 
 
-def test_qualified_company_continues_to_next_candidate():
-    state, log = run({"galux"})
-    # 적격이 나와도 4곳 모두 평가한다
-    assert [e["company_id"] for e in state["evaluations"]] == [c["company_id"] for c in config.CANDIDATES]
-    assert [e["verdict"] for e in state["evaluations"]] == ["보류", "보류", "적격", "보류"]
-    assert log == [("report", "galux")]
-    assert state["reports"] == ["galux.pdf"]
+OK = ("확인됨", "확인됨")
 
 
-def test_no_qualified_writes_no_qualified_report():
-    state, log = run(set())
-    assert len(state["evaluations"]) == 4
-    assert all(e["verdict"] == "보류" for e in state["evaluations"])
-    assert log == [("no_qualified", None)]
+def test_workers_only_talk_to_supervisor():
+    graph = build_graph(make_nodes({}, []))
+    edges = graph.get_graph().edges
+    for edge in edges:
+        if edge.source in WORKERS:
+            assert edge.target == "supervisor", f"{edge.source} -> {edge.target}"
+    assert all(edge.source in ("__start__", "supervisor") or edge.target == "supervisor" for edge in edges)
 
 
-def test_judge_uses_only_current_company_evidence():
-    state, _ = run({"standigm", "galux"})
+def test_rework_only_where_evidence_is_short_and_steps_differ_by_company():
+    plan = {
+        "standigm": {a: OK for a in config.AREAS},                                   # 충분 → 재작업 없음
+        "diagen": {**{a: OK for a in config.AREAS}, "regulation": ("기업 주장만", "확인됨")},  # 규제만 재작업
+        "galux": {**{a: OK for a in config.AREAS}, "tech": ("error", "error")},      # 실패 → 1회 재시도 후 판정
+        "drnoah": {},                                                                # 근거 없음 → 4영역 재작업
+    }
+    state, log = run(plan)
+    research = [entry for entry in log if len(entry) == 3]
+    reworks = {cid: [area for c, area, mode in research if c == cid and mode == "rework"]
+               for cid in ("standigm", "diagen", "galux", "drnoah")}
+    assert reworks["standigm"] == []
+    assert reworks["diagen"] == ["regulation"]
+    assert reworks["galux"] == ["tech"]
+    # 4영역 모두 부족해도 기업당 예산(2회) 안에서만 재작업한다
+    assert len(reworks["drnoah"]) == config.MAX_REWORK_PER_COMPANY
     verdicts = {e["company_id"]: e["verdict"] for e in state["evaluations"]}
-    assert verdicts["standigm"] == "적격" and verdicts["diagen"] == "보류" and verdicts["galux"] == "적격"
+    assert verdicts["standigm"] == "적격" and verdicts["diagen"] == "적격"
+    assert verdicts["drnoah"] == "보류"
+    assert len(state["evaluations"]) == 4
+    assert state["errors"], "실패한 조사는 에러로 남는다"
 
 
-def test_missing_nodes_are_reported(monkeypatch):
-    import pytest
-    import graph
-    monkeypatch.setattr(graph, "load_nodes", lambda: {})
-    with pytest.raises(NotImplementedError):
-        build_graph({})
+def test_regulation_and_market_wait_for_tech():
+    log = []
+    run_plan = {c["company_id"]: {a: OK for a in config.AREAS} for c in config.CANDIDATES}
+    graph = build_graph(make_nodes(run_plan, log))
+    graph.invoke({"trace_id": "test", "candidates": config.CANDIDATES, "current_idx": -1, "evidence": [],
+                  "evaluations": [], "step_count": 0, "max_steps": config.MAX_STEPS, "report_revisions": 0})
+    for cid in run_plan:
+        order = [area for c, area, _ in (entry for entry in log if len(entry) == 3) if c == cid]
+        assert order.index("tech") < order.index("regulation")
+        assert order.index("tech") < order.index("market")
+
+
+def test_quality_loop_rewrites_report_until_pass():
+    state, log = run({}, quality_fail_until=1)
+    assert [entry for entry in log if entry[0] in ("report", "quality")] == [
+        ("report", 0), ("quality", False), ("report", 1), ("quality", True)]
+    assert state["status"] == "done"
+
+
+def test_quality_failure_stops_at_revision_limit():
+    state, log = run({}, quality_fail_until=99)
+    assert sum(1 for entry in log if entry[0] == "report") == config.MAX_REPORT_REVISIONS + 1
+    assert state["status"] == "quality_failed"
+
+
+def test_step_limit_still_finishes_every_company():
+    state, log = run({}, max_steps=4)
+    assert len(state["evaluations"]) == 4
+    assert state["status"] in ("done", "quality_failed")
+    assert not any(mode == "rework" for _, _, mode in [e for e in log if len(e) == 3])
+
+
+def test_judge_not_allowed_while_gap_and_budget_remain():
+    state = {"candidates": config.CANDIDATES, "company": config.CANDIDATES[0], "evaluations": [],
+             "area_status": {a: "done" for a in config.AREAS}, "rework_count": {}, "evidence": [],
+             "step_count": 0, "max_steps": config.MAX_STEPS}
+    allowed, _ = allowed_actions(state, sufficiency(state))
+    assert "judge" not in allowed and set(allowed) == set(config.AREAS)
+    state["rework_count"] = {"tech": 1, "regulation": 1}
+    assert allowed_actions(state, sufficiency(state))[0] == ["judge"]
+
+
+def test_guard_overrides_choice_outside_allowed():
+    state = {"trace_id": "test", "candidates": config.CANDIDATES, "company": config.CANDIDATES[0],
+             "evaluations": [], "area_status": {a: "pending" for a in config.AREAS}, "evidence": [],
+             "step_count": 0, "max_steps": config.MAX_STEPS}
+    update = supervisor_node(state, choose=lambda *a: Decision(next="report", reason="건너뛰기"))
+    assert update["next"] in ("company", "tech")

@@ -1,5 +1,5 @@
 """근거(Evidence) 공통 타입. 조사 노드가 쓰고 투자 판단·보고서가 읽는다."""
-from typing import Literal, Optional, TypedDict
+from typing import Literal, NotRequired, Optional, TypedDict
 
 EvidenceStatus = Literal["확인됨", "기업 주장만", "찾지 못함", "상충함"]
 
@@ -15,6 +15,7 @@ class Evidence(TypedDict):
     page: Optional[int]       # RAG 문서면 쪽, 웹이면 None
     published: Optional[str]  # "YYYY-MM-DD"
     accessed: str             # "YYYY-MM-DD"
+    title: NotRequired[Optional[str]]   # 웹 페이지 제목 (REFERENCE 표기용)
 
 
 class PipelineItem(TypedDict):

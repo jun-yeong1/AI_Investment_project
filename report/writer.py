@@ -229,6 +229,24 @@ def _fact_key(evidence: dict) -> str:
     return re.sub(r"\W", "", str(evidence.get("fact", "")))[:60]
 
 
+MARKET_SIZE = re.compile(r"시장\s*규모|시장은|환자\s*수|억\s*달러|조\s*원\s*규모|market size|patients", re.IGNORECASE)
+IDEA_ITEMS = ("technology", "competition", "stage")
+
+
+def _extra_line(lines: "_Lines", line_id: str, label: str, company: dict, evidence: dict | None,
+                citations: CitationIndex, missing: str) -> None:
+    """보고서 필수 내용(사업 아이디어 · 시장 규모)은 12항목 밖이라 별도 ID로 기업 블록 맨 앞에 넣는다."""
+    if evidence is None:
+        lines.items.append({"id": line_id, "kind": "note", "company_id": company["company_id"],
+                            "text": f"{company['name']} · {label}: {missing}", "evidence_ids": [], "citations": []})
+        return
+    number = citations.add(evidence)
+    dated = f", {evidence['published']} 자료" if evidence.get("published") else ""
+    lines.items.append({"id": line_id, "kind": "fact", "company_id": company["company_id"],
+                        "text": f"{company['name']} · {label}: {_plain(evidence['fact'])} ({evidence['status']}{dated}) [{number}]",
+                        "evidence_ids": [evidence["id"]], "citations": [number]})
+
+
 def _fact_text(company: str, code: str, evidence: dict, number: int) -> str:
     # 기업 주장만인 근거도 언론 보도일 수 있어 "기업 발표"로 단정하지 않고 끝의 상태 표기로 구분한다
     # "내년" 같은 표현의 기준 시점을 알 수 있게 원문 발행일을 함께 적는다
@@ -245,6 +263,20 @@ def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[d
         lines = _Lines(f"ch{number}")
         for company in candidates:
             company_id, name = company["company_id"], company["name"]
+            pool = evidence_by_company[company_id]
+            if key == "chapter1":
+                ideas = [e for e in pool if e.get("item") in IDEA_ITEMS and _fact_key(e) not in facts[company_id]]
+                idea = min(ideas, key=lambda e: (STATUS_RANK.get(e["status"], 3), _is_blog(e["source"])), default=None)
+                if idea:
+                    facts[company_id].add(_fact_key(idea))
+                _extra_line(lines, f"ch1-idea-{company_id}", "사업 아이디어", company, idea, citations,
+                            "핵심 기술 · 플랫폼을 설명하는 원문 근거를 찾지 못함.")
+            if key == "chapter2":
+                size = next((e for e in pool if MARKET_SIZE.search(e.get("fact", "")) and _fact_key(e) not in facts[company_id]), None)
+                if size:
+                    facts[company_id].add(_fact_key(size))
+                _extra_line(lines, f"ch2-size-{company_id}", "시장 규모", company, size, citations,
+                            "원문으로 검증한 시장 규모 · 환자 수 수치를 찾지 못함.")
             absent = []
             for code in codes:
                 judged = scores.get(company_id, {}).get(code, {}).get("evidence_ids", [])

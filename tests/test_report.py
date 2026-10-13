@@ -326,7 +326,7 @@ def test_company_summaries_are_fact_lines(state, sections):
             assert line["evidence_ids"] and line["citations"]
             assert markers(line["text"]) == line["citations"]
     first = summary_lines(sections, "standigm")[0]
-    assert first["text"].startswith("스탠다임은 standigm management 사실 1") and first["text"].endswith("라고 밝혔다. [1]")
+    assert first["text"].startswith("스탠다임은 standigm management 사실 1") and re.search(r"라고 밝혔다\. \[\d+\]$", first["text"])
     # 요지가 인용한 근거도 REFERENCE에 같은 출처 번호로 실린다
     ref = next(r for r in sections["references"] if r["number"] == first["citations"][0])
     assert first["evidence_ids"][0] in ref["evidence_ids"]
@@ -855,3 +855,14 @@ def test_neutral_rewrite_keeps_status_label():
     text = revised["chapters"][0]["lines"][0]["text"]
     assert text == "스탠다임 · 경영진: AI 신약 개발사다. (확인됨, 2025-07-21 자료) [1]"
     assert revised["changes"][0]["before"].startswith("스탠다임 · 경영진: 국내 최초")
+
+
+
+def test_required_report_contents_idea_and_market_size(state):
+    """과제 보고서 필수 내용: 1장에 사업 아이디어, 2장에 시장 규모(근거가 없으면 없다고 적는다)."""
+    sections = build_sections(state, no_summary)
+    ch1 = {line["id"]: line for line in sections["chapters"][0]["lines"]}
+    ch2 = {line["id"]: line for line in sections["chapters"][1]["lines"]}
+    for company in state["candidates"]:
+        assert "사업 아이디어" in ch1[f"ch1-idea-{company['company_id']}"]["text"]
+        assert "시장 규모" in ch2[f"ch2-size-{company['company_id']}"]["text"]

@@ -241,7 +241,7 @@ def _bias_rules(pairs: list[tuple[str, dict]], evidence_by_id: dict[str, dict],
 
 # 근거 원문에 있어도 보고서 문장에는 쓰지 않는 정도 표현. LLM Judge가 "(기업 주장만)" 표기만 보고 통과시키는 경우를 규칙으로 막는다
 HYPE = re.compile(r"최고(?!\s*(?:경영|사업|기술|재무|운영|과학|의학|책임|투자|전략|정보))|최초|최상|획기적|압도적|독보적|혁신적|"
-                  r"세계적|선도적|유일한|극대화|수백 배|폭발적|탁월한|퀀텀 점프|우수한|뛰어난|순조롭게|순조로운")
+                  r"세계적|선도적|유일한|유일하게|극대화|수백 배|폭발적|탁월한|퀀텀 점프|우수한|뛰어난|순조롭게|순조로운|차별화된")
 QUOTED = "원문 — \""   # 근거 원문을 그대로 인용한 문장(재작성 결과)은 보고서의 표현이 아니라 출처의 말이다
 
 
@@ -315,6 +315,9 @@ def _judge_items(pairs: list[tuple[str, dict]], evidence_by_id: dict[str, dict],
     for key, line in pairs:
         is_fact = line.get("kind") == "fact"
         if not is_fact and key not in ("summary", "chapter4"):
+            continue
+        if QUOTED in _text(line):
+            # 원문을 그대로 옮긴 줄은 출처의 말이다. 중립성 재작성에 넘기면 "원문 —" 표시를 단 채 문장이 바뀌어 버린다
             continue
         company_id = line.get("company_id")
         items.append({

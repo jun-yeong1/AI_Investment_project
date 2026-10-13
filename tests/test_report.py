@@ -905,3 +905,22 @@ def test_market_size_line_needs_a_number():
     lines = all_lines(build_sections(one_company_state(evidence), no_summary))
     size = next(line for line in lines if line["id"] == f"ch2-size-{cid}")
     assert size["evidence_ids"] == [f"{cid}-competition-001"]
+
+
+def test_representative_prefers_evidence_whose_numbers_are_in_the_quote():
+    """수치가 저장된 인용(300자)에 없는 근거는 품질 평가에서 원문 인용으로 바뀌므로, 수치까지 확인되는 근거를 먼저 쓴다."""
+    cid = "standigm"
+    evidence = [
+        make_evidence(cid, "funding", 1, fact="스탠다임은 2022년 2월 200억 원을 유치했다.", quote="스탠다임은 투자를 유치했다"),
+        make_evidence(cid, "funding", 2, fact="스탠다임은 누적 803억원을 유치했다.", quote="누적 803억원의 투자를 유치"),
+    ]
+    lines = all_lines(build_sections(one_company_state(evidence), no_summary))
+    funding = next(line for line in lines if "· 자금 조달:" in line["text"])
+    assert funding["evidence_ids"] == [f"{cid}-funding-002"]
+
+
+def test_truncated_quote_is_clipped_at_a_word():
+    cut = ("word " * 59) + "furt"                       # 저장 한도(300자)에서 낱말 중간에 잘린 인용
+    assert writer._clip(cut).endswith("word …") and "furt" not in writer._clip(cut)
+    assert writer._clip("짧은 인용") == "짧은 인용"
+    assert writer._clip(("단어 " * 99) + "끝.") .endswith("끝.")   # 문장으로 끝나면 그대로

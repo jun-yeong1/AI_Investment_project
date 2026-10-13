@@ -561,7 +561,9 @@ def test_prompt_defines_both_judgments():
 
 
 @pytest.mark.parametrize("claim", ["글로벌 최고 수준의 기술력을 확보했다.",
-                                   "임상 1상에서 우수한 안전성 프로파일을 확보하며 순조롭게 진행 중이다."])
+                                   "임상 1상에서 우수한 안전성 프로파일을 확보하며 순조롭게 진행 중이다.",
+                                   "국내 기업 중 유일하게 포함되었다.",
+                                   "글로벌 시장에서 차별화된 경쟁력으로 평가받는다."])
 def test_hype_words_are_caught_by_rule_even_if_judge_passes(claim):
     """LLM Judge가 통과시켜도 과장 수식어는 규칙이 잡아 재작성 대상으로 넘긴다."""
     import quality.evaluator as qe
@@ -656,3 +658,14 @@ def test_unchanged_lines_reuse_previous_judgment():
     assert asked == ["ch1-002"]
     assert second["passed"]
     assert {j["line_id"] for j in second["judgments"]} == {j["line_id"] for j in first["judgments"]}
+
+
+def test_quote_lines_are_not_sent_to_llm_judge():
+    """원문 인용 줄은 출처의 말이라 LLM 판정 · 재작성 대상이 아니다(재작성하면 '원문 —' 표시를 단 채 문장이 바뀐다)."""
+    calls = []
+    sections = make_sections()
+    quoted = next(l for c in sections["chapters"] for l in c["lines"] if l["id"] == "ch1-001")
+    quoted["text"] = '스탠다임 · 경영진: 원문 — "standigm-1 원문 인용" (확인됨) [1]'
+    result = run(sections=sections, judge=make_judge(not_neutral={"ch1-001"}, calls=calls))
+    assert "ch1-001" not in {item["line_id"] for batch in calls for item in batch}
+    assert "ch1-001" not in {f["line_id"] for f in result["flagged_lines"]}

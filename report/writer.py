@@ -215,6 +215,14 @@ def _is_blog(source: str) -> bool:
 
 # 경영진 칸은 사람(대표 · 창업자 · 임원)을 말하는 근거를 먼저 고른다. 플랫폼 소개가 경영진 칸에 오는 것을 막는다
 TOPIC = {"management": re.compile(r"대표|CEO|CTO|CSO|CFO|COO|창업자|공동창업|사장|이사|임원|박사|책임자")}
+DIGITS = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _numbers_quoted(evidence: dict) -> bool:
+    """사실의 수치가 저장된 인용에 모두 있으면 True. 품질 평가의 수치 규칙과 같은 기준이라,
+    이런 근거를 먼저 고르면 보고서 문장이 원문 인용으로 바뀌는 일이 줄어든다."""
+    quote = re.sub(r"(?<=\d),(?=\d)", "", str(evidence.get("quote") or ""))
+    return all(re.sub(r"(?<=\d),(?=\d)", "", n) in quote for n in DIGITS.findall(str(evidence.get("fact") or "")))
 
 
 def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains: set[str],
@@ -228,6 +236,7 @@ def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains
     topic = TOPIC.get(code)
     return min(pool, key=lambda e: (
         bool(topic) and not topic.search(e.get("fact", "")),
+        not _numbers_quoted(e),
         e["id"] not in order,
         STATUS_RANK.get(e["status"], 3),
         _is_blog(e["source"]),
@@ -279,8 +288,9 @@ def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[d
             pool = evidence_by_company[company_id]
             if key == "chapter1":
                 ideas = [e for e in pool if e.get("item") in IDEA_ITEMS and _fact_key(e) not in facts[company_id]]
-                idea = min(ideas, key=lambda e: (not PLATFORM.search(e.get("fact", "")), IDEA_ITEMS.index(e["item"]),
-                                                 STATUS_RANK.get(e["status"], 3), _is_blog(e["source"])), default=None)
+                idea = min(ideas, key=lambda e: (not PLATFORM.search(e.get("fact", "")), not _numbers_quoted(e),
+                                                 IDEA_ITEMS.index(e["item"]), STATUS_RANK.get(e["status"], 3),
+                                                 _is_blog(e["source"])), default=None)
                 if idea:
                     facts[company_id].add(_fact_key(idea))
                 _extra_line(lines, f"ch1-idea-{company_id}", "사업 아이디어", company, idea, citations,
@@ -530,6 +540,17 @@ def _reference_number(evidence_id: str, line: dict, references: list[dict]) -> i
     return (line.get("citations") or [None])[0]
 
 
+QUOTE_LIMIT = 300   # agents/common.py MAX_QUOTE_CHARS — 근거 인용은 이 길이에서 잘려 저장된다
+
+
+def _clip(quote: str) -> str:
+    """저장 한도에서 잘린 인용은 끊긴 낱말을 버리고 말줄임표를 붙인다(…and we furt → …and we …)."""
+    if len(quote) < QUOTE_LIMIT - 5 or quote[-1] in ".!?。\"”'’)":
+        return quote
+    cut = quote.rfind(" ")
+    return (quote[:cut].rstrip(" ,") if cut > 0 else quote) + " …"
+
+
 def _quote_line(line: dict, evidence_by_id: dict[str, dict], references: list[dict],
                 names: dict[str, str]) -> bool:
     """줄을 근거 원문 인용으로 바꾼다. 인용할 원문이나 출처 번호가 없으면 False."""
@@ -544,7 +565,7 @@ def _quote_line(line: dict, evidence_by_id: dict[str, dict], references: list[di
         if quote and number and not EMPTY_QUOTE.match(quote):
             label = f"{head}: " if head else ""
             tail = f" {status.group(0)}" if status else ""
-            line.update(text=f'{label}원문 — "{quote}"{tail} [{number}]', evidence_ids=[evidence_id],
+            line.update(text=f'{label}원문 — "{_clip(quote)}"{tail} [{number}]', evidence_ids=[evidence_id],
                         citations=[number])
             return True
     return False

@@ -9,6 +9,15 @@ AI 신약개발(Healthcare AI) 스타트업 4곳의 공개 근거를 기업 · �
 - Pattern : Supervisor - RAG 버전은 고정 검색어로 한 번만 조사해 48칸 중 45칸이 근거 부족으로 끝났다. 무엇이 부족할지는 조사해 봐야 알 수 있어, 미리 계획을 세우는 Orchestrator-Workers 대신 조사 결과를 보고 부족한 영역만 재조사시키는 Supervisor를 골랐다.
 - 동적 처리 : 고정된 `select → (company ∥ tech) → (regulation ∥ market) → judge` 대신 `supervisor ⇄ 워커` 구조에서 State의 영역별 근거 · 조사 상태 · 재작업 횟수에 따라 다음 담당과 재작업을 정한다.
 
+## Selected Companies (샘플의 Selected Technologies에 해당)
+
+- Domain : Healthcare AI · AI 신약개발 — 임상 단계 · 임상시험계획 승인 · 기술이전 계약 같은 판단 근거를 공시 · 보도로 확인할 수 있다.
+- 선정 기준 : 비상장 · Seed~Series C · Exit 없음을 확인한 AI 신약개발 스타트업 4곳이다.
+- 스탠다임 : AI 신약 타깃 발굴
+- 디어젠 : AI 타깃 발굴~물질 최적화
+- 갤럭스 : AI 항체 설계
+- 닥터노아바이오텍 : AI 복합신약
+
 ## Features
 
 - 근거 수집 : 웹 검색 → 원문 수집 → LLM 추출 → 인용 검증을 수행하고, Agentic RAG로 찾은 기준 문서는 추출 문맥으로 쓴다.

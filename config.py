@@ -58,3 +58,9 @@ SOURCE_DOMAINS = {
     "company": ["dart.fss.or.kr", "thevc.kr", "innoforest.co.kr"],
     "market": ["dart.fss.or.kr", "kind.krx.co.kr", "fiercebiotech.com", "biospace.com"],
 }
+
+# 독립 출처 = 기업이 통제하지 않는 공식 기록 · 동료심사 논문. 이 도메인의 원문(목표 기업명 포함)은 "확인됨"으로 본다
+INDEPENDENT_DOMAINS = (
+    "clinicaltrials.gov", "pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov", "nature.com",
+    "sciencedirect.com", "pubs.acs.org", "fda.gov", "go.kr", "dart.fss.or.kr", "kind.krx.co.kr",
+)

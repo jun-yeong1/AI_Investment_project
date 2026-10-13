@@ -15,7 +15,7 @@ from dotenv import dotenv_values, load_dotenv
 from langchain_core.runnables.config import ContextThreadPoolExecutor
 from pydantic import BaseModel, Field
 
-from config import JUDGE_MODEL, JUDGE_PROVIDER, SOURCE_DOMAINS, today
+from config import INDEPENDENT_DOMAINS, JUDGE_MODEL, JUDGE_PROVIDER, SOURCE_DOMAINS, today
 from state import State
 from tools.evidence import Evidence, PipelineItem, make_evidence_id
 
@@ -115,6 +115,11 @@ def _search(services: "ResearchTools", query: str, domains: list[str] | None) ->
         return services.web_search(query, include_domains=domains)
     except TypeError:  # 도메인 지정을 모르는 검색 도구(테스트용 가짜 등)는 일반 검색으로
         return services.web_search(query)
+
+
+def _independent(url: str) -> bool:
+    host = urlsplit(url).netloc.lower()
+    return any(host == domain or host.endswith("." + domain) for domain in INDEPENDENT_DOMAINS)
 
 
 def _urls(search_result: Any) -> Iterable[str]:
@@ -340,8 +345,14 @@ def research(
                 continue
             seen_quotes.add(quote_key)
             item_counts[finding.item] += 1
-            # 기업 자체 사이트의 내용은 LLM이 확인됨으로 분류해도 독립 출처가 아니므로 기업 주장만으로 둔다
-            status = "기업 주장만" if _own_site(page.url, aliases[1:]) else finding.status
+            # "확인됨"은 LLM 추측이 아니라 출처 유형으로 정한다: 기업 자체 사이트 = 기업 주장만,
+            # 공식 기록 · 동료심사 논문(목표 기업명은 이미 확인) = 확인됨, 그 밖에는 LLM 분류
+            if _own_site(page.url, aliases[1:]):
+                status = "기업 주장만"
+            elif _independent(page.url):
+                status = "확인됨"
+            else:
+                status = finding.status
             evidence.append(
                 Evidence(
                     id=make_evidence_id(company_id, finding.item, item_counts[finding.item]),

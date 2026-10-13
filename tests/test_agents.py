@@ -194,6 +194,18 @@ class AgentContractTests(unittest.TestCase):
         result = tech_pipeline_node(state, tools=services)
         self.assertEqual([e["status"] for e in result["evidence"]], ["기업 주장만"])
 
+    def test_independent_source_is_confirmed_by_rule(self):
+        state = {"company": CANDIDATES[2]}
+        services = ResearchTools(
+            web_search=lambda query: ["https://pmc.ncbi.nlm.nih.gov/articles/PMC1"],
+            fetch_page=lambda url: FetchedPage(url, "Galux designed antibodies with high affinity.", None, "2026-10-13"),
+            extract=lambda *args: PageAnalysis.model_validate(
+                {"findings": [{"item": "technology", "fact": "항체 설계 결과 논문", "quote": "designed antibodies with high affinity", "status": "기업 주장만"}]}),
+            rag_search=lambda *args, **kwargs: [],
+        )
+        result = tech_pipeline_node(state, tools=services)
+        self.assertEqual([e["status"] for e in result["evidence"]], ["확인됨"])
+
     def test_rag_miss_uses_web_after_rag_retry(self):
         state = {"company": CANDIDATES[0]}
         tools, calls = fake_tools(

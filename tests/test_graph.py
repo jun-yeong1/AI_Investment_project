@@ -219,7 +219,10 @@ def test_rebuild_report_reruns_only_report_stage():
         reports = [entry for entry in log if entry[0] == "report"]
         reset_report_stage(graph, config_)
         final = graph.invoke(None, config_)
-    assert first["status"] == "done" and final["status"] == "done"
+        reset_report_stage(graph, config_)                   # 여러 번 다시 만들어도 단계 수가 쌓이지 않는다
+        again = graph.invoke(None, config_)
+    assert first["status"] == "done" and final["status"] == "done" and again["status"] == "done"
+    assert first["step_count"] == final["step_count"] == again["step_count"]
     assert [entry for entry in log if len(entry) == 3] == research          # 조사 반복 없음
     assert len([entry for entry in log if entry[0] == "report"]) > len(reports)
     assert final["evaluations"] == first["evaluations"]

@@ -77,8 +77,20 @@ REPORT_RESET = {"report_sections": None, "quality": None, "report_revisions": 0,
 
 
 def reset_report_stage(graph, config: dict[str, Any]) -> None:
-    """체크포인트를 판정 직후 상태로 되돌린다. 이어 실행하면 supervisor가 보고서 → 품질 평가부터 다시 고른다."""
-    graph.update_state(config, REPORT_RESET, as_node="judge")
+    """체크포인트를 마지막 판정 직후 상태로 되돌린다. 이어 실행하면 supervisor가 보고서 → 품질 평가부터 다시 고른다.
+    단계 수(step_count)도 그때 값으로 되돌린다. 안 그러면 다시 만들 때마다 앞선 보고서 단계의 호출이 쌓여 단계 상한에 걸린다."""
+    current = graph.get_state(config).values
+    total = len(current.get("candidates", []))
+    judged_steps = current.get("step_count", 0)
+    for snapshot in graph.get_state_history(config):   # 최신 → 과거. 판정이 다 끝난 구간에서 보고서가 없던 가장 이른 시점
+        values = snapshot.values
+        if len(values.get("evaluations", [])) < total:
+            break
+        if not values.get("report_sections"):
+            judged_steps = values.get("step_count", 0)
+    # step_count는 더하기 리듀서라 차이만큼 빼서 되돌린다
+    graph.update_state(config, {**REPORT_RESET, "step_count": judged_steps - current.get("step_count", 0)},
+                       as_node="judge")
 
 
 def run(trace_id: str, *, resume: bool, rebuild_report: bool = False) -> dict[str, Any]:

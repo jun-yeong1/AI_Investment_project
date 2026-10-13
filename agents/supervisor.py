@@ -91,7 +91,8 @@ def allowed_actions(state: State, suff: dict | None) -> tuple[list[str], str]:
             return [FINISH], "품질 평가 통과"
         if state.get("report_revisions", 0) < MAX_REPORT_REVISIONS and not over_limit:
             return ["report"], f"품질 미달({quality.get('summary', '')}) — 재작성"
-        return [FINISH], "재작성 상한 도달 — 미통과 항목을 남기고 종료"
+        limit = "단계 상한" if over_limit else "재작성 상한"
+        return [FINISH], f"{limit} 도달 — 미통과 항목을 남기고 종료"
 
     company = state.get("company")
     if not company or company.get("company_id") in evaluated:

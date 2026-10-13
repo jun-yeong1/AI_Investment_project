@@ -30,6 +30,7 @@ PROMPT = (ROOT / "prompts" / "supervisor.md").read_text(encoding="utf-8")
 CONFIRMED = "확인됨"
 FINISH = "FINISH"
 AREA_NAMES = {"company": "기업", "tech": "기술·파이프라인", "regulation": "규제", "market": "시장·사업화"}
+GATE_AREAS = {ITEMS[gate][1] for gate in GATE_ITEMS}   # tech, regulation
 RISK_WORDS = re.compile(r"중단|반려|지연|소송|분쟁|해지|철회|실패|보류|hold|suspend|terminat|fail|lawsuit|withdraw|reject",
                         re.IGNORECASE)
 
@@ -103,11 +104,13 @@ def allowed_actions(state: State, suff: dict | None) -> tuple[list[str], str]:
     if pending:
         # 규제 · 시장은 기술 조사가 찾은 물질 · 적응증 단위로 검색해야 의미가 있다(데이터 의존)
         ready = [a for a in pending if a in ("company", "tech") or status.get("tech") in ("done", "failed")]
+        ready.sort(key=lambda a: a not in GATE_AREAS)
         return ready, f"미조사 영역 {', '.join(AREA_NAMES[a] for a in pending)}"
 
     rework = state.get("rework_count", {})
     weak = {g["area"] for g in (suff or {}).get("gaps", [])} | {a for a in AREAS if status.get(a) == "failed"}
-    retry = [a for a in AREAS if a in weak and rework.get(a, 0) < MAX_REWORK_PER_AREA]
+    retry = sorted((a for a in AREAS if a in weak and rework.get(a, 0) < MAX_REWORK_PER_AREA),
+                   key=lambda a: a not in GATE_AREAS)   # 교정할 때 기본값이 관문 영역이 되도록 앞에 둔다
     if sum(rework.values()) >= MAX_REWORK_PER_COMPANY:
         retry = []
     if retry:
@@ -140,6 +143,9 @@ def _brief(state: State, suff: dict | None, allowed: list[str], why: str) -> str
             lines.append(f"- {code}({ITEMS[code][0]}, 영역 {ITEMS[code][1]}{gate}): "
                          f"{', '.join(f'{k} {v}' for k, v in bucket.items()) or '근거 없음'}")
         lines.append("부족: " + ("; ".join(g["reason"] for g in suff["gaps"]) or "없음"))
+    done = [AREA_NAMES[a] for a, n in state.get("rework_count", {}).items() if n >= MAX_REWORK_PER_AREA]
+    if done:
+        lines.append(f"이미 재작업해 다시 고를 수 없는 영역: {', '.join(done)}")
     used = [q for q in state.get("task", {}).get("queries", [])]
     if used:
         lines.append(f"직전 재작업 검색어: {' / '.join(used)}")

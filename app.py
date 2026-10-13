@@ -108,6 +108,7 @@ def run(trace_id: str, *, resume: bool) -> dict[str, Any]:
         report_pages=final.get("report_pages"),
         report_revisions=final.get("report_revisions"),
         quality=final.get("quality"),
+        report_changes=(final.get("report_sections") or {}).get("changes", []),
         evaluations=final.get("evaluations", []),
         errors=final.get("errors", []),
         evidence=final.get("evidence", []),

@@ -163,3 +163,39 @@ def test_guard_overrides_choice_outside_allowed():
              "step_count": 0, "max_steps": config.MAX_STEPS}
     update = supervisor_node(state, choose=lambda *a: Decision(next="report", reason="건너뛰기"))
     assert update["next"] in ("company", "tech")
+
+
+def test_resume_from_checkpoint_after_crash():
+    """워커가 예외로 멈춰도 같은 thread_id로 이어 실행하면 끝난 단계는 다시 하지 않고 마저 끝난다(--resume과 같은 경로)."""
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    log = []
+    nodes = make_nodes({c["company_id"]: {a: OK for a in config.AREAS} for c in config.CANDIDATES}, log)
+    real_market = nodes["market"]
+    crashed = []
+
+    def market_once_broken(state):
+        if state["company"]["company_id"] == "diagen" and not crashed:
+            crashed.append(True)
+            raise ConnectionError("네트워크 끊김")
+        return real_market(state)
+
+    nodes["market"] = market_once_broken
+    config_ = {"configurable": {"thread_id": "resume-test"}}
+    start = {"trace_id": "resume-test", "candidates": config.CANDIDATES, "current_idx": -1, "evidence": [],
+             "evaluations": [], "step_count": 0, "max_steps": config.MAX_STEPS, "report_revisions": 0}
+    with SqliteSaver.from_conn_string(":memory:") as saver:
+        graph = build_graph(nodes, checkpointer=saver)
+        try:
+            graph.invoke(start, config_)
+            raise AssertionError("첫 실행은 중간에 멈춰야 한다")
+        except ConnectionError:
+            pass
+        done_before = [entry for entry in log if len(entry) == 3]
+        assert len(graph.get_state(config_).values["evaluations"]) == 1   # 스탠다임까지만 판정
+        final = graph.invoke(None, config_)                               # --resume
+    research = [entry for entry in log if len(entry) == 3]
+    assert len(final["evaluations"]) == 4 and final["status"] == "done"
+    # 멈추기 전에 끝난 조사는 다시 하지 않는다(스탠다임 4영역은 한 번씩만)
+    assert sum(1 for c, *_ in research if c == "standigm") == 4
+    assert research[:len(done_before)] == done_before

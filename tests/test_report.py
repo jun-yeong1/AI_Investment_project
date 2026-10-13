@@ -78,10 +78,10 @@ def make_state():
 
 
 def fake_summary(evaluation, evidence):
+    # 실제 요지 프롬프트처럼 기업 주장은 "~라고 밝혔다"로 귀속한다
     return [
-        {"text": f"{evaluation['name']}은 평가 기준상 {evaluation['verdict']} 판정이다.",
-         "evidence_ids": [evidence[0]["id"]]},
-        {"text": f"{evaluation['name']}은 {evidence[1]['fact']}", "evidence_ids": [evidence[1]["id"]]},
+        {"text": f"{evaluation['name']}은 {evidence[0]['fact']}라고 밝혔다.", "evidence_ids": [evidence[0]["id"]]},
+        {"text": f"{evaluation['name']}은 {evidence[1]['fact']}라고 밝혔다.", "evidence_ids": [evidence[1]["id"]]},
     ]
 
 
@@ -326,7 +326,7 @@ def test_company_summaries_are_fact_lines(state, sections):
             assert line["evidence_ids"] and line["citations"]
             assert markers(line["text"]) == line["citations"]
     first = summary_lines(sections, "standigm")[0]
-    assert first["text"] == "스탠다임은 평가 기준상 적격 판정이다. [1]"
+    assert first["text"].startswith("스탠다임은 standigm management 사실 1") and first["text"].endswith("라고 밝혔다. [1]")
     # 요지가 인용한 근거도 REFERENCE에 같은 출처 번호로 실린다
     ref = next(r for r in sections["references"] if r["number"] == first["citations"][0])
     assert first["evidence_ids"][0] in ref["evidence_ids"]
@@ -580,7 +580,7 @@ def flag(line_id, check, reason="사유", suggestion="제안"):
 
 
 def neutral_rewrite(requests):
-    return [{"line_id": r["line_id"], "text": f"중립으로 고쳤다 [9] ({r['line_id']})"} for r in requests]
+    return [{"line_id": r["line_id"], "text": f"중립으로 고쳤다고 밝혔다 [9] ({r['line_id']})"} for r in requests]
 
 
 def changed_ids(before, after):
@@ -658,7 +658,7 @@ def test_neutrality_rewrites_with_llm_and_restores_citation_numbers(state, secti
     n = original["citations"][0]
     text = line_of(revised, "ch3-001")["text"]
     # LLM의 [9]는 지우고 원래 번호, 지워진 근거 상태 표기는 코드가 다시 붙인다
-    assert text.startswith("중립으로 고쳤다 (ch3-001) (") and text.endswith(f") [{n}]")
+    assert text.startswith("중립으로 고쳤다고 밝혔다 (ch3-001) (") and text.endswith(f") [{n}]")
     assert line_of(revised, "ch3-001")["citations"] == original["citations"]
     assert changed_ids(before, revised) == {"ch3-001", "ch4-sum-diagen-2"}  # 판단 요지 문장도 같은 경로
     assert revised["revision"] == 1
@@ -739,7 +739,7 @@ def test_report_node_first_write_and_rewrite(state, tmp_path, monkeypatch):
     assert again["report_revisions"] == 1 and again["report_sections"]["revision"] == 1
     assert again["report_path"] == first["report_path"]
     assert changed_ids(first["report_sections"], again["report_sections"]) == {"ch1-001"}
-    assert "중립으로 고쳤다 (ch1-001)" in " ".join("\n".join(pdf_text(again["report_path"])).split())
+    assert "중립으로 고쳤다고 밝혔다 (ch1-001)" in " ".join("\n".join(pdf_text(again["report_path"])).split())
 
     passed = {**state, **first, "quality": {**quality, "passed": True}}
     assert report_node(passed, summarize_company=fake_summary)["report_revisions"] == 0

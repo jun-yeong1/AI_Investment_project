@@ -303,7 +303,8 @@ def test_claim_only_evidence_needs_chapter5_note():
     evidence = make_evidence()
     evidence[0]["status"] = "기업 주장만"
     result = run(evidence=evidence)
-    assert failed_checks(result) == {"bias"}
+    # 이 문장은 귀속 표기가 없어 중립성 규칙에도 걸린다. 여기서 보는 것은 편향(5장 공개) 쪽
+    assert "bias" in failed_checks(result)
     [issue] = result["checks"]["bias"]["issues"]
     assert issue["company_id"] == "standigm" and "기업 주장만" in issue["reason"]
 

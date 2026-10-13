@@ -35,6 +35,7 @@ CHAPTERS = (
 )
 AREA_NAMES = {"company": "기업", "tech": "기술", "regulation": "규제", "market": "시장"}
 CLAIM = "기업 주장만"
+REWRITE_BATCH = 10
 STATUS_LABEL = re.compile(r"\((?:확인됨|기업 주장만|상충함)[^()]*\)")
 STATUS_RANK = {"확인됨": 0, CLAIM: 1, "상충함": 2}
 MAX_SUMMARY_SENTENCES = 3
@@ -574,7 +575,10 @@ def revise_sections(sections: dict, quality: dict, evidence_by_id: dict[str, dic
 
     if requests:
         try:
-            replaced = _rewrites((rewrite or _llm_rewrite)(requests))
+            # 한 번에 수십 줄을 보내면 응답이 길이 한도를 넘어 통째로 실패한다 → 10줄씩 나눠 고친다
+            replaced = {}
+            for start in range(0, len(requests), REWRITE_BATCH):
+                replaced.update(_rewrites((rewrite or _llm_rewrite)(requests[start:start + REWRITE_BATCH])))
         except Exception as exc:  # LLM 오류 때문에 이미 만든 보고서까지 잃으면 안 된다
             LOGGER.warning("중립 재작성에 실패해 해당 줄을 그대로 둔다: %s", exc)
             replaced = {}

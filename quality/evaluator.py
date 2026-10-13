@@ -218,11 +218,18 @@ HYPE = re.compile(r"최고(?!\s*(?:경영|사업|기술|재무|운영|과학|의
 QUOTED = "원문 — \""   # 근거 원문을 그대로 인용한 문장(재작성 결과)은 보고서의 표현이 아니라 출처의 말이다
 
 
-def _neutrality_rules(pairs: list[tuple[str, dict]]) -> list[Issue]:
+ATTRIBUTED = re.compile(r"\(기업 주장만|밝혔|따르면|설명이다|설명했")
+
+
+def _neutrality_rules(pairs: list[tuple[str, dict]], evidence_by_id: dict[str, dict]) -> list[Issue]:
     issues = []
     for _, line in pairs:
         if line.get("kind") != "fact":
             continue
+        # 기업 주장만인 근거를 쓴 문장은 상태 표기나 귀속 표현이 있어야 한다(LLM은 이 표기를 실행마다 다르게 읽어 코드가 판정)
+        claims = [i for i in line.get("evidence_ids") or [] if (evidence_by_id.get(i) or {}).get("status") == "기업 주장만"]
+        if claims and QUOTED not in _text(line) and not ATTRIBUTED.search(_text(line)):
+            issues.append(_issue("neutrality", "기업 주장만인 근거를 귀속 없이 사실처럼 씀", line=line))
         if QUOTED in _text(line):
             continue
         found = sorted(set(HYPE.findall(_text(line))))
@@ -386,7 +393,7 @@ def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], repo
     issues["groundedness"] += _groundedness_rules(sections, pairs, evidence_by_id)
     issues["bias"] += _bias_rules(pairs, evidence_by_id, names, evaluations_by_id, scores_by_company or {})
     issues["format"] += _format_rules(sections, report_pages)
-    issues["neutrality"] += _neutrality_rules(pairs)
+    issues["neutrality"] += _neutrality_rules(pairs, evidence_by_id)
 
     items = _judge_items(pairs, evidence_by_id, names)
     results, failures = _run_judge(judge or llm_judge, _batches(items, lines_by_id))

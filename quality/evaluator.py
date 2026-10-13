@@ -59,6 +59,7 @@ class QualityResult(TypedDict):
     checks: dict[str, CheckResult]
     flagged_lines: list[FlaggedLine]
     summary: str
+    judgments: list[dict]   # 문장별 LLM 판정(line_id · text 포함). 다음 판에서 바뀌지 않은 문장은 이 판정을 다시 쓴다
 
 
 class LineJudgment(BaseModel):
@@ -402,11 +403,13 @@ def _summary(blocking: dict[str, list[Issue]], advisory: int) -> str:
 
 
 def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], report_pages: int,
-             *, judge: Judge | None = None, scores_by_company: dict | None = None) -> QualityResult:
+             *, judge: Judge | None = None, scores_by_company: dict | None = None,
+             previous: dict | None = None) -> QualityResult:
     """보고서 하나를 평가한다. LLM 호출 외에는 부작용이 없다.
 
     judge(items) -> QualityJudgeOutput 또는 같은 모양의 dict. 생략하면 llm_judge를 쓴다.
     items 원소: {line_id, kind, company, text, evidence: [{id, quote, status, source}]}
+    previous: 직전 판의 평가 결과. 글자까지 같은 문장은 그 판정을 다시 쓰고 LLM에 묻지 않는다.
     """
     pairs = _lines(sections)
     lines_by_id = {line["id"]: line for _, line in pairs}
@@ -422,7 +425,15 @@ def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], repo
     issues["neutrality"] += _neutrality_rules(pairs, evidence_by_id)
 
     items = _judge_items(pairs, evidence_by_id, names)
-    results, failures = _run_judge(judge or llm_judge, _batches(items, lines_by_id))
+    # 고치지 않은 문장은 다시 묻지 않는다. LLM Judge는 같은 문장에도 판마다 다른 답을 낼 수 있어,
+    # 이미 통과한 문장이 다음 판에서 새로 미달이 되면 재작성 루프가 수렴하지 않는다
+    cached = {(j.get("line_id"), j.get("text")): j for j in (previous or {}).get("judgments") or []}
+    fresh = [item for item in items if (item["line_id"], item["text"]) not in cached]
+    results, failures = _run_judge(judge or llm_judge, _batches(fresh, lines_by_id))
+    for item in items:
+        hit = cached.get((item["line_id"], item["text"]))
+        if hit is not None:
+            results[item["line_id"]] = LineJudgment(**{key: hit.get(key) for key in LineJudgment.model_fields})
     grounded, neutral, flagged = _llm_issues(items, results, failures, lines_by_id)
     # 규칙으로 잡힌 근거성 위반도 재작성 대상에 넣는다(원문 인용으로 바꾸면 번호 · 근거 연결이 다시 맞춰진다)
     already = {f["line_id"] for f in flagged}
@@ -453,6 +464,8 @@ def evaluate(sections: dict, evidence: list[dict], evaluations: list[dict], repo
         "checks": checks,
         "flagged_lines": flagged,
         "summary": _summary(blocking, advisory),
+        "judgments": [{**results[item["line_id"]].model_dump(), "text": item["text"]}
+                      for item in items if item["line_id"] in results],
     }
 
 
@@ -468,5 +481,6 @@ def quality_node(state: dict, *, judge: Judge | None = None) -> dict:
         state.get("report_pages") or 0,
         judge=judge,
         scores_by_company=state.get("scores_by_company"),
+        previous=state.get("quality"),
     )
     return {"quality": result}

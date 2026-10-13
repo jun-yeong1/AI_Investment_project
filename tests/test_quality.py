@@ -639,3 +639,20 @@ def test_numbers_missing_from_quote_are_groundedness_issues():
     flagged = [f for f in result["flagged_lines"] if f["check"] == "groundedness"]
     assert [f["line_id"] for f in flagged] == ["ch1-001"]          # 상태 표기의 날짜 · 쉼표 금액은 지적하지 않는다
     assert "50" in flagged[0]["reason"]
+
+
+def test_unchanged_lines_reuse_previous_judgment():
+    """직전 판과 글자까지 같은 문장은 LLM에 다시 묻지 않고 그 판정을 쓴다. 고친 문장만 새로 판정한다."""
+    calls = []
+    first = run(judge=make_judge(not_neutral={"ch1-002"}))
+    assert [f["line_id"] for f in first["flagged_lines"]] == ["ch1-002"]
+
+    sections = make_sections()
+    line_of_sections = next(l for c in sections["chapters"] for l in c["lines"] if l["id"] == "ch1-002")
+    line_of_sections["text"] = "스탠다임은 2024년 시리즈A 투자를 받았다고 밝혔다. [2]"
+    # 두 번째 Judge는 바뀌지 않은 ch1-001까지 미달로 볼 만큼 흔들리지만, 그 문장은 묻지 않는다
+    second = run(sections=sections, judge=make_judge(unsupported={"ch1-001"}, calls=calls), previous=first)
+    asked = [item["line_id"] for batch in calls for item in batch]
+    assert asked == ["ch1-002"]
+    assert second["passed"]
+    assert {j["line_id"] for j in second["judgments"]} == {j["line_id"] for j in first["judgments"]}

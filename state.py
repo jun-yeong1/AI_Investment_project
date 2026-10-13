@@ -126,3 +126,4 @@ class QualityInput(TypedDict, total=False):
     evidence: list[Evidence]
     evaluations: list[dict]
     scores_by_company: dict
+    quality: dict             # 직전 판 평가(바뀌지 않은 문장의 LLM 판정 재사용)

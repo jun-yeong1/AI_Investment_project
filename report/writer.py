@@ -35,6 +35,7 @@ CHAPTERS = (
 )
 AREA_NAMES = {"company": "기업", "tech": "기술", "regulation": "규제", "market": "시장"}
 CLAIM = "기업 주장만"
+STATUS_LABEL = re.compile(r"\((?:확인됨|기업 주장만|상충함)[^()]*\)")
 STATUS_RANK = {"확인됨": 0, CLAIM: 1, "상충함": 2}
 MAX_SUMMARY_SENTENCES = 3
 QUOTE_PREVIEW = 150
@@ -577,6 +578,12 @@ def revise_sections(sections: dict, quality: dict, evidence_by_id: dict[str, dic
             # LLM이 붙였을 수 있는 [n]은 지우고 원래 인용 번호를 다시 붙인다.
             text = _plain(replaced.get(request["line_id"]))
             if text:
+                # 재작성이 끝의 근거 상태 표기(확인됨 · 기업 주장만, 발행일)를 지우면 코드가 다시 붙인다
+                label = STATUS_LABEL.search(_plain(request["text"]))
+                if label and STATUS_LABEL.search(text):
+                    text = STATUS_LABEL.sub(lambda _: label.group(0), text, count=1)
+                elif label:
+                    text = f"{text.rstrip()} {label.group(0)}"
                 line["text"] = text + _marks(line.get("citations") or [])
             else:
                 LOGGER.warning("줄 %s의 재작성 결과가 없어 그대로 둔다", request["line_id"])

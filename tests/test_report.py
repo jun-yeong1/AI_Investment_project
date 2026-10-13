@@ -654,7 +654,9 @@ def test_neutrality_rewrites_with_llm_and_restores_citation_numbers(state, secti
     assert request["reason"] == "과장 수식어" and request["suggestion"] == "수식어를 뺀다"
     assert request["quotes"] == [evidence_by_id[original["evidence_ids"][0]]["quote"]]
     n = original["citations"][0]
-    assert line_of(revised, "ch3-001")["text"] == f"중립으로 고쳤다 (ch3-001) [{n}]"  # LLM의 [9]는 지우고 원래 번호
+    text = line_of(revised, "ch3-001")["text"]
+    # LLM의 [9]는 지우고 원래 번호, 지워진 근거 상태 표기는 코드가 다시 붙인다
+    assert text.startswith("중립으로 고쳤다 (ch3-001) (") and text.endswith(f") [{n}]")
     assert line_of(revised, "ch3-001")["citations"] == original["citations"]
     assert changed_ids(before, revised) == {"ch3-001", "ch4-sum-diagen-2"}  # 판단 요지 문장도 같은 경로
     assert revised["revision"] == 1
@@ -672,7 +674,7 @@ def test_rewrite_output_shapes(state, sections, shape):
 
     revised = revise_sections(sections, {"flagged_lines": [flag("ch2-003", "neutrality")]},
                               {e["id"]: e for e in state["evidence"]}, rewrite=rewrite)
-    assert line_of(revised, "ch2-003")["text"].startswith("중립 문장 [")
+    assert line_of(revised, "ch2-003")["text"].startswith("중립 문장 (")
 
 
 def test_note_lines_and_unknown_ids_are_left_alone(state, sections):
@@ -793,7 +795,8 @@ def test_default_rewrite_llm_path(state, sections, monkeypatch):
     monkeypatch.setattr(writer, "_chat_model", lambda: stub)
     revised = revise_sections(sections, {"flagged_lines": [flag("ch3-001", "neutrality", "과장", "고쳐라")]},
                               {e["id"]: e for e in state["evidence"]})
-    assert line_of(revised, "ch3-001")["text"].startswith("스탠다임은 플랫폼을 활용한다고 밝혔다. (기업 주장만) [")
+    # LLM이 근거 상태 표기를 바꿔 써도(확인됨 → 기업 주장만) 원래 상태로 되돌린다. 상태는 LLM이 정하지 않는다
+    assert line_of(revised, "ch3-001")["text"].startswith("스탠다임은 플랫폼을 활용한다고 밝혔다. (확인됨, 2026-09-01 자료) [")
     prompt = stub.prompts[0]
     assert "[ch3-001] 기업: 스탠다임" in prompt and "지적 사유: 과장" in prompt and "수정 제안: 고쳐라" in prompt
     assert "{lines}" not in prompt and "근거 원문: technology 원문 인용 1" in prompt
@@ -828,3 +831,21 @@ def test_report_and_quality_loop_converges(state, tmp_path, monkeypatch):
     second = report_node({**state, **first, "quality": quality}, rewrite=neutral_rewrite)
     assert second["report_revisions"] == 1
     assert run_quality(second)["passed"]
+
+
+def test_neutral_rewrite_keeps_status_label():
+    """재작성 LLM이 문장 끝 근거 상태 표기를 지워도 코드가 다시 붙인다."""
+    sections = {"title": "t", "revision": 0, "summary": [], "chapters": [{"key": "chapter1", "title": "1", "lines": [
+        {"id": "ch1-001", "kind": "fact", "company_id": "standigm",
+         "text": "스탠다임 · 경영진: 국내 최초 AI 신약 개발사다. (확인됨, 2025-07-21 자료) [1]",
+         "evidence_ids": ["standigm-management-001"], "citations": [1]}]}],
+        "references": [{"number": 1, "source": "https://news.example/a", "page": None, "published": "2025-07-21",
+                        "accessed": "2026-10-13", "title": None, "evidence_ids": ["standigm-management-001"]}]}
+    quality = {"passed": False, "flagged_lines": [{"line_id": "ch1-001", "check": "neutrality",
+                                                   "reason": "과장 수식어 최초 사용", "suggestion": ""}]}
+    evidence = {"standigm-management-001": {"id": "standigm-management-001", "quote": "국내 최초 AI 신약 개발사"}}
+    revised = writer.revise_sections(sections, quality, evidence,
+                                     rewrite=lambda requests: [{"line_id": "ch1-001", "text": "스탠다임 · 경영진: AI 신약 개발사다."}])
+    text = revised["chapters"][0]["lines"][0]["text"]
+    assert text == "스탠다임 · 경영진: AI 신약 개발사다. (확인됨, 2025-07-21 자료) [1]"
+    assert revised["changes"][0]["before"].startswith("스탠다임 · 경영진: 국내 최초")

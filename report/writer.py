@@ -236,8 +236,8 @@ def _pick(code: str, candidates: list[dict], judged_ids: list[str], used_domains
     topic = TOPIC.get(code)
     return min(pool, key=lambda e: (
         bool(topic) and not topic.search(e.get("fact", "")),
+        e["id"] not in order,           # 판정이 점수에 쓴 근거가 대표 근거다
         not _numbers_quoted(e),
-        e["id"] not in order,
         STATUS_RANK.get(e["status"], 3),
         _is_blog(e["source"]),
         domain_of(e["source"]) in used_domains,

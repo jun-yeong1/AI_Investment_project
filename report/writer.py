@@ -231,6 +231,7 @@ def _fact_key(evidence: dict) -> str:
 
 MARKET_SIZE = re.compile(r"시장\s*규모|시장은|환자\s*수|억\s*달러|조\s*원\s*규모|market size|patients", re.IGNORECASE)
 IDEA_ITEMS = ("technology", "competition", "stage")
+ABSENT = re.compile(r"없다|없음|없으며|확인되지 않")
 
 
 def _extra_line(lines: "_Lines", line_id: str, label: str, company: dict, evidence: dict | None,
@@ -272,7 +273,9 @@ def _item_chapters(candidates: list[dict], evidence_by_company: dict[str, list[d
                 _extra_line(lines, f"ch1-idea-{company_id}", "사업 아이디어", company, idea, citations,
                             "핵심 기술 · 플랫폼을 설명하는 원문 근거를 찾지 못함.")
             if key == "chapter2":
-                size = next((e for e in pool if MARKET_SIZE.search(e.get("fact", "")) and _fact_key(e) not in facts[company_id]), None)
+                # "시장 규모 정보가 없다"처럼 부재를 말하는 문장은 시장 규모 근거가 아니다
+                size = next((e for e in pool if MARKET_SIZE.search(e.get("fact", "")) and not ABSENT.search(e.get("fact", ""))
+                             and _fact_key(e) not in facts[company_id]), None)
                 if size:
                     facts[company_id].add(_fact_key(size))
                 _extra_line(lines, f"ch2-size-{company_id}", "시장 규모", company, size, citations,

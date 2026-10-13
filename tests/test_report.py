@@ -598,7 +598,9 @@ def test_groundedness_replaces_line_with_source_quote(state, sections):
                               rewrite=lambda requests: pytest.fail("중립 재작성은 호출되면 안 된다"))
     quote = evidence_by_id[target["evidence_ids"][0]]["quote"]
     new = line_of(revised, "ch1-002")
-    assert new["text"] == f'스탠다임: 원문 — "{quote}" [{target["citations"][0]}]'
+    # 이름표(기업 · 항목)와 근거 상태 표기는 남기고 본문만 원문 인용으로 바뀐다
+    assert new["text"].startswith("스탠다임 · ") and f'원문 — "{quote}" (' in new["text"]
+    assert new["text"].endswith(f"[{target['citations'][0]}]")
     assert new["kind"] == "fact" and new["evidence_ids"] == target["evidence_ids"]
     assert changed_ids(before, revised) == {"ch1-002"}
     assert revised["revision"] == 1 and sections == before  # 입력은 바뀌지 않는다
@@ -691,7 +693,7 @@ def test_both_checks_on_one_line_use_the_quote_only(state, sections):
     both = [flag("ch1-004", "neutrality"), flag("ch1-004", "groundedness")]
     revised = revise_sections(sections, {"flagged_lines": both}, evidence_by_id,
                               rewrite=lambda requests: pytest.fail("호출되면 안 된다"))
-    assert line_of(revised, "ch1-004")["text"].startswith("디어젠: 원문 — ")
+    assert line_of(revised, "ch1-004")["text"].startswith("디어젠 · ") and "원문 — " in line_of(revised, "ch1-004")["text"]
 
 
 def test_empty_flags_still_count_as_a_revision(state, sections):
@@ -712,6 +714,10 @@ def test_failed_or_empty_rewrite_keeps_the_line(state, sections):
 
 
 def test_company_names_come_from_candidates(state, sections):
+    """이름표(기업 · 항목)가 없는 줄(판단 요지 등)은 names의 기업명을 붙인다."""
+    sections = copy.deepcopy(sections)
+    line = line_of(sections, "ch1-001")
+    line["text"] = line["text"].split(": ", 1)[1]
     revised = revise_sections(sections, {"flagged_lines": [flag("ch1-001", "groundedness")]},
                               {e["id"]: e for e in state["evidence"]}, names={"standigm": "다른이름"})
     assert line_of(revised, "ch1-001")["text"].startswith("다른이름: 원문 — ")

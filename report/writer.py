@@ -485,12 +485,17 @@ def _quote_line(line: dict, evidence_by_id: dict[str, dict], references: list[di
                 names: dict[str, str]) -> bool:
     """줄을 근거 원문 인용으로 바꾼다. 인용할 원문이나 출처 번호가 없으면 False."""
     company = names.get(line.get("company_id")) or line.get("company_id") or ""
+    original = _plain(line.get("text", ""))
+    # "스탠다임 · 경영진:" 같은 이름표와 끝의 근거 상태 표기는 그대로 두고 본문만 원문 인용으로 바꾼다
+    head = original.split(": ", 1)[0] if " · " in original.split(": ", 1)[0] else company
+    status = STATUS_LABEL.search(original)
     for evidence_id in line.get("evidence_ids") or []:
         quote = _plain((evidence_by_id.get(evidence_id) or {}).get("quote"))
         number = _reference_number(evidence_id, line, references)
         if quote and number:
-            label = f"{company}: " if company else ""
-            line.update(text=f'{label}원문 — "{quote}" [{number}]', evidence_ids=[evidence_id],
+            label = f"{head}: " if head else ""
+            tail = f" {status.group(0)}" if status else ""
+            line.update(text=f'{label}원문 — "{quote}"{tail} [{number}]', evidence_ids=[evidence_id],
                         citations=[number])
             return True
     return False
